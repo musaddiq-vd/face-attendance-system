@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Private data: database, employee photos and secret key (never upload these)
+attendance.db
+snapshots/
+profile_photos/
+instance/
+.secret_key
+.kiosk_key
+.env
+.pytest_cache/
+
+# Local tool settings
+.claude/

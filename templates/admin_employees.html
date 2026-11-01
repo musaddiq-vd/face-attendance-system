@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Employees · Admin{% endblock %}
+{% from "_avatar.html" import avatar %}
+{% block content %}
+<h1>Employees</h1>
+<p class="sub">Add an employee here, then register their face with the camera. Employees log in with their Employee ID.</p>
+
+<div class="card">
+  <h2>Add employee</h2>
+  <form method="post">
+    <div class="grid-2">
+      <div class="field"><label>Employee ID *</label><input name="emp_code" required placeholder="EMP001"></div>
+      <div class="field"><label>Full name *</label><input name="name" required></div>
+      <div class="field"><label>Email (for leave / concern updates)</label><input name="email" type="email"></div>
+      <div class="field"><label>Department</label><input name="department"></div>
+      <div class="field"><label>Password * (min 6)</label><input name="password" type="text" minlength="6" required></div>
+      <div class="field"><label>Role</label>
+        <select name="role"><option value="employee">Employee</option><option value="admin">Admin</option></select></div>
+    </div>
+    <button class="btn">Add employee</button>
+  </form>
+</div>
+
+<div class="card table-wrap">
+  <table>
+    <thead><tr><th>ID</th><th>Name</th><th>Department</th><th>Role</th><th>Face</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+    {% for u in users %}
+      <tr>
+        <td>{{ u.emp_code }}</td>
+        <td>{{ avatar(u) }}{{ u.name }}</td>
+        <td>{{ u.department or '—' }}</td>
+        <td style="text-transform:capitalize">{{ u.role }}</td>
+        <td><span class="pill {{ 'yes' if u.has_face else 'no' }}">{{ 'Registered' if u.has_face else 'Missing' }}</span></td>
+        <td><span class="pill {{ 'yes' if u.active else 'inactive' }}">{{ 'Active' if u.active else 'Inactive' }}</span></td>
+        <td><a class="btn small secondary" href="{{ url_for('admin_employee_edit', uid=u.id) }}">Manage</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

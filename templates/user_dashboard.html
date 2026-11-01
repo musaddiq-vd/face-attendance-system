@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}My Attendance{% endblock %}
+{% block content %}
+<div class="row-between">
+  <div>
+    <h1>My Attendance — {{ month_label }}</h1>
+    <p class="sub" style="margin:0">{{ rules }}</p>
+  </div>
+  <form class="inline" method="get">
+    <div class="field"><label>Month</label><input type="month" name="month" value="{{ month_value }}" onchange="this.form.submit()"></div>
+  </form>
+</div>
+
+{% if not current_user.has_face %}
+  <div class="flash error">Your face is not registered yet, so the entrance camera cannot mark your attendance.
+    Please ask the admin to register your face.</div>
+{% endif %}
+
+{% if summary.corrected %}
+  <div class="flash success">The admin corrected your attendance on {{ summary.corrected }} day(s) this month. Look for the "Corrected by admin" tag below.</div>
+{% endif %}
+
+{% include "_month_table.html" %}
+{% endblock %}

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Today · Admin{% endblock %}
+{% from "_avatar.html" import avatar %}
+{% block content %}
+<h1>Today — {{ today.strftime('%A, %d %B %Y') }}</h1>
+<p class="sub">{{ rules }} · <a href="{{ url_for('admin_settings') }}">Change</a></p>
+{% for w in warnings %}<div class="flash error">⚠ {{ w }}</div>{% endfor %}
+{% if holiday %}<div class="flash success">Today is a holiday: {{ holiday.name }}</div>{% endif %}
+
+<div class="stats">
+  <div class="stat"><div class="label">Active employees</div><div class="value">{{ stats.total }}</div></div>
+  <div class="stat green"><div class="label">Checked in (on time + late)</div><div class="value">{{ stats.present }}</div></div>
+  <div class="stat amber"><div class="label">Late</div><div class="value">{{ stats.late }}</div></div>
+  <div class="stat"><div class="label">On leave</div><div class="value">{{ stats.on_leave }}</div></div>
+  <div class="stat red"><div class="label">Not in yet</div><div class="value">{{ stats.absent }}</div></div>
+</div>
+
+<div class="card">
+  <h2>Entrance camera (kiosk)</h2>
+  <p class="muted" style="margin-top:0">Open this link on the computer at the entrance and keep it on full screen:</p>
+  <p><code class="kiosk">{{ kiosk_url }}</code> &nbsp; <a class="btn small" href="{{ kiosk_url }}" target="_blank">Open kiosk</a></p>
+  {% if stats.no_face %}<p class="muted">{{ stats.no_face }} employee(s) have not registered their face yet.</p>{% endif %}
+</div>
+
+<div class="card table-wrap">
+  <table>
+    <thead><tr><th>Employee</th><th>Department</th><th>Status</th><th>Check-in</th><th>Last seen / Check-out</th><th>Face</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td>{{ avatar(r.user) }}<a href="{{ url_for('admin_attendance', employee=r.user.id) }}">{{ r.user.name }}</a> <span class="muted">{{ r.user.emp_code }}</span></td>
+        <td>{{ r.user.department or '—' }}</td>
+        <td>{% if r.record %}<span class="pill {{ r.record.status }}">{{ r.record.status | status_label }}</span>{% elif r.leave %}<span class="pill leave">On leave · {{ r.leave }}</span>{% else %}<span class="pill absent">Not in</span>{% endif %}</td>
+        <td>{{ r.record.check_in | t if r.record else '—' }}
+          {% if r.record and r.record.check_in_photo %}<a href="{{ url_for('admin_snapshot', rel=r.record.check_in_photo) }}" target="_blank"><img class="thumb" src="{{ url_for('admin_snapshot', rel=r.record.check_in_photo) }}" alt="check-in photo"></a>{% endif %}</td>
+        <td>{{ r.record.check_out | t if r.record else '—' }}</td>
+        <td><span class="pill {{ 'yes' if r.user.has_face else 'no' }}">{{ 'Registered' if r.user.has_face else 'Missing' }}</span></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="muted">No employees yet. <a href="{{ url_for('admin_employees') }}">Add employees →</a></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

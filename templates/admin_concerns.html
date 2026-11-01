@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Concerns · Admin{% endblock %}
+{% from "_avatar.html" import avatar %}
+{% block content %}
+<div class="row-between">
+  <div><h1>Concerns</h1><p class="sub" style="margin:0">Attendance problems reported by employees. Check the time, correct it, and resolve.</p></div>
+  <form class="inline" method="get">
+    <div class="field"><label>Show</label>
+      <select name="status" onchange="this.form.submit()">
+        <option value="open" {{ 'selected' if status == 'open' }}>Open</option>
+        <option value="resolved" {{ 'selected' if status == 'resolved' }}>Resolved</option>
+        <option value="all" {{ 'selected' if status == 'all' }}>All</option>
+      </select></div>
+  </form>
+</div>
+
+{% for c in concerns %}{% set rec = records[c.id] %}
+<div class="concern card">
+  <div class="head">
+    <div><strong>{{ c.subject }}</strong>
+      <div class="meta">{{ avatar(c.user, 22) }}{{ c.user.name }} ({{ c.user.emp_code }})
+        {% if c.date %} · For <strong>{{ c.date.strftime('%a, %d %b %Y') }}</strong>{% endif %}
+        · Sent {{ c.created_at.strftime('%d %b, %I:%M %p') }}</div></div>
+    <span class="pill {{ c.status }}">{{ c.status }}</span>
+  </div>
+  <p class="msg">{{ c.message }}</p>
+
+  {% if c.date %}
+  <div class="compare">
+    <div><div class="meta">Recorded now</div>
+      {% if rec %}In <strong>{{ rec.check_in | t }}</strong> · Out <strong>{{ rec.check_out | t }}</strong>
+        {% if rec.check_in_photo %}<a href="{{ url_for('admin_snapshot', rel=rec.check_in_photo) }}" target="_blank"><img class="thumb" src="{{ url_for('admin_snapshot', rel=rec.check_in_photo) }}" alt="check-in photo"></a>{% endif %}
+        {% if rec.check_out_photo %}<a href="{{ url_for('admin_snapshot', rel=rec.check_out_photo) }}" target="_blank"><img class="thumb" src="{{ url_for('admin_snapshot', rel=rec.check_out_photo) }}" alt="check-out photo"></a>{% endif %}
+      {% else %}<strong>No attendance</strong>{% endif %}</div>
+    <div><div class="meta">Employee asked for</div>
+      {% if c.requested_in or c.requested_out %}In <strong>{{ c.requested_in or '—' }}</strong> · Out <strong>{{ c.requested_out or '—' }}</strong>{% else %}—{% endif %}</div>
+  </div>
+  {% endif %}
+
+  {% if c.status == 'open' and c.date %}
+    <form method="post" action="{{ url_for('admin_concern_fix', cid=c.id, status=status) }}" class="fix-form">
+      <div class="grid-2">
+        <div class="field"><label>Check-in</label><input type="time" name="check_in"
+          value="{{ c.requested_in or (rec.check_in.strftime('%H:%M') if rec and rec.check_in else '') }}"></div>
+        <div class="field"><label>Check-out</label><input type="time" name="check_out"
+          value="{{ c.requested_out or (rec.check_out.strftime('%H:%M') if rec and rec.check_out else '') }}"></div>
+      </div>
+      <div class="field"><label>Reply to employee (optional)</label><input name="reply" placeholder="Leave empty for an automatic reply"></div>
+      <button class="btn green">✓ Correct attendance &amp; resolve</button>
+      <span class="muted" style="font-size:13px">&nbsp;Empty check-in = mark absent.</span>
+    </form>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('admin_concern_reply', cid=c.id) }}" style="margin-top:12px">
+    {% if c.status == 'open' %}
+      <div class="field"><label>{{ 'Or reject / reply without changing attendance' if c.date else 'Reply' }}</label>
+        <textarea name="reply" placeholder="Write a reply…">{{ c.admin_reply or '' }}</textarea></div>
+      <button class="btn secondary" name="action" value="resolve">Reply &amp; close</button>
+      <button class="btn secondary" name="action" value="reply">Reply only (keep open)</button>
+    {% else %}
+      {% if c.admin_reply %}<div class="reply"><strong>Your reply:</strong> {{ c.admin_reply }}</div>{% endif %}
+      <button class="btn small secondary" name="action" value="reopen" style="margin-top:10px">Reopen</button>
+    {% endif %}
+  </form>
+</div>
+{% else %}
+  <p class="muted">No {{ '' if status == 'all' else status }} concerns.</p>
+{% endfor %}
+{% endblock %}

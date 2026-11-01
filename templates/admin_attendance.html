@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}Attendance · Admin{% endblock %}
+{% from "_avatar.html" import avatar %}
+{% block content %}
+<div class="row-between">
+  <div>
+    <h1 style="display:flex;align-items:center">{% if selected %}{{ avatar(selected, 40) }}{% endif %}Attendance{% if selected %} — {{ selected.name }}{% endif %}</h1>
+    <p class="sub" style="margin:0">{% if mode == 'day' %}All employees on {{ day.strftime('%A, %d %b %Y') }}{% else %}Month view for one employee{% endif %}</p>
+  </div>
+  <form class="inline" method="get">
+    <div class="field"><label>Employee</label>
+      <select name="employee" onchange="this.form.submit()">
+        <option value="">All (daily view)</option>
+        {% for e in employees %}<option value="{{ e.id }}" {{ 'selected' if selected and selected.id == e.id }}>{{ e.name }} ({{ e.emp_code }})</option>{% endfor %}
+      </select></div>
+    {% if mode == 'day' %}
+      <div class="field"><label>Date</label><input type="date" name="date" value="{{ day.isoformat() }}" onchange="this.form.submit()"></div>
+    {% else %}
+      <div class="field"><label>Month</label><input type="month" name="month" value="{{ month_value }}" onchange="this.form.submit()"></div>
+    {% endif %}
+    <a class="btn secondary" href="{{ url_for('admin_export', month=month_value, employee=selected.id if selected else None) }}">Export CSV ({{ month_value }})</a>
+  </form>
+</div>
+
+{% if mode == 'month' %}
+  {% set edit_user = selected %}
+  {% include "_month_table.html" %}
+{% else %}
+<div class="card table-wrap">
+  <table>
+    <thead><tr><th>Employee</th><th>Department</th><th>Status</th><th>Check-in</th><th>Check-out</th><th>Hours</th><th>Note</th><th></th></tr></thead>
+    <tbody>
+    {% for r in rows %}{% set rec = r.record %}
+      <tr>
+        <td>{{ avatar(r.user) }}<a href="{{ url_for('admin_attendance', employee=r.user.id, month=month_value) }}">{{ r.user.name }}</a> <span class="muted">{{ r.user.emp_code }}</span></td>
+        <td>{{ r.user.department or '—' }}</td>
+        <td>{% include "_status.html" %}</td>
+        <td>{{ rec.check_in | t if rec else '—' }}
+          {% if rec and rec.check_in_photo %}<a href="{{ url_for('admin_snapshot', rel=rec.check_in_photo) }}" target="_blank"><img class="thumb" src="{{ url_for('admin_snapshot', rel=rec.check_in_photo) }}" alt="check-in photo"></a>{% endif %}</td>
+        <td>{{ rec.check_out | t if rec else '—' }}
+          {% if rec and rec.check_out_photo %}<a href="{{ url_for('admin_snapshot', rel=rec.check_out_photo) }}" target="_blank"><img class="thumb" src="{{ url_for('admin_snapshot', rel=rec.check_out_photo) }}" alt="check-out photo"></a>{% endif %}</td>
+        <td>{{ rec.hours if rec and rec.hours is not none else '—' }}</td>
+        <td class="muted">{{ rec.note if rec and rec.note else '' }}</td>
+        <td><button class="btn small secondary edit-btn" type="button"
+              data-uid="{{ r.user.id }}" data-name="{{ r.user.name }}" data-date="{{ day.isoformat() }}"
+              data-in="{{ rec.check_in.strftime('%H:%M') if rec and rec.check_in else '' }}"
+              data-out="{{ rec.check_out.strftime('%H:%M') if rec and rec.check_out else '' }}"
+              data-status="{{ rec.status if rec else '' }}">Edit</button></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="8" class="muted">No employees yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<dialog id="editDialog">
+  <form method="post" action="{{ url_for('admin_attendance_edit') }}">
+    <h2 style="margin-top:0" id="editTitle">Edit attendance</h2>
+    <input type="hidden" name="user_id" id="eUid">
+    <input type="hidden" name="date" id="eDate">
+    <div class="grid-2">
+      <div class="field"><label>Check-in</label><input type="time" name="check_in" id="eIn"></div>
+      <div class="field"><label>Check-out</label><input type="time" name="check_out" id="eOut"></div>
+    </div>
+    <div class="field"><label>Status</label>
+      <select name="status" id="eStatus">
+        <option value="">Auto (by check-in time)</option>
+        <option value="present">On time</option>
+        <option value="late">Late</option>
+      </select></div>
+    <p style="margin:0 0 6px">Will be saved as: <span id="ePreview" class="pill"></span></p>
+    <p class="muted" style="font-size:13px">Auto: check-in after {{ late_at }} is Late (change in Settings). Leave check-in empty to mark absent.</p>
+    <button class="btn">Save</button>
+    <button class="btn secondary" type="button" onclick="document.getElementById('editDialog').close()">Cancel</button>
+  </form>
+</dialog>
+{% endblock %}
+{% block scripts %}
+<script>
+const LATE_AT = "{{ late_at }}";
+const eIn = document.getElementById("eIn"), eOut = document.getElementById("eOut");
+const eStatus = document.getElementById("eStatus"), ePreview = document.getElementById("ePreview");
+
+// Shows what the record will look like after saving
+function updatePreview() {
+  let cls, text;
+  if (!eIn.value) { cls = "absent"; text = "Absent"; }
+  else {
+    cls = eStatus.value || (eIn.value > LATE_AT ? "late" : "present");
+    text = cls === "late" ? "Late" : "On time";
+  }
+  ePreview.className = "pill " + cls;
+  ePreview.textContent = text;
+  eOut.setCustomValidity(eIn.value && eOut.value && eOut.value < eIn.value ? "Check-out must be after check-in" : "");
+}
+[eIn, eOut, eStatus].forEach(el => el.addEventListener("input", updatePreview));
+
+document.querySelectorAll(".edit-btn").forEach(btn => btn.addEventListener("click", () => {
+  const d = btn.dataset;
+  document.getElementById("editTitle").textContent = `${d.name} — ${d.date}`;
+  document.getElementById("eUid").value = d.uid;
+  document.getElementById("eDate").value = d.date;
+  eIn.value = d.in;
+  eOut.value = d.out;
+  eStatus.value = "";  // Auto: status follows the check-in time
+  updatePreview();
+  document.getElementById("editDialog").showModal();
+}));
+</script>
+{% endblock %}

@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}My Concerns{% endblock %}
+{% block content %}
+<h1>Concerns</h1>
+<p class="sub">Wrong attendance, missed check-out, or the camera did not recognize you? Tell the admin here. The admin will check and correct it.</p>
+
+<div class="card">
+  <h2>New concern</h2>
+  <form method="post">
+    <div class="grid-2">
+      <div class="field"><label>Date</label><input type="date" name="date" id="cDate" value="{{ prefill_date }}" max="{{ now.strftime('%Y-%m-%d') }}"></div>
+      <div class="field"><label>Problem *</label>
+        <select name="subject" id="cSubject" required>
+          <option value="Check-out not marked">Check-out not marked</option>
+          <option value="Check-in not marked">Check-in not marked</option>
+          <option value="Wrong time recorded">Wrong time recorded</option>
+          <option value="Marked absent but I was present">Marked absent but I was present</option>
+          <option value="Camera not recognizing my face">Camera not recognizing my face</option>
+          <option value="Other">Other</option>
+        </select>
+      </div>
+    </div>
+    {% if prefill_date %}
+      <p class="muted" style="margin-top:0">Currently recorded for this day:
+        {% if prefill_rec %}check-in <strong>{{ prefill_rec.check_in | t }}</strong>, check-out <strong>{{ prefill_rec.check_out | t }}</strong>{% else %}<strong>no attendance</strong>{% endif %}</p>
+    {% endif %}
+    <div class="grid-2" id="timeFields">
+      <div class="field"><label>Correct check-in time</label><input type="time" name="requested_in"
+        value="{{ prefill_rec.check_in.strftime('%H:%M') if prefill_rec and prefill_rec.check_in else '' }}"></div>
+      <div class="field"><label>Correct check-out time</label><input type="time" name="requested_out"
+        value="{{ prefill_rec.check_out.strftime('%H:%M') if prefill_rec and prefill_rec.check_out else '' }}"></div>
+    </div>
+    <div class="field"><label>Message *</label><textarea name="message" required placeholder="What happened? (e.g. I left at 6:15 PM but the camera was off)"></textarea></div>
+    <button class="btn">Send to admin</button>
+  </form>
+</div>
+
+<h2 style="font-size:16px">My concerns</h2>
+{% for c in concerns %}{% set rec = records[c.id] %}
+  <div class="concern card">
+    <div class="head">
+      <div><strong>{{ c.subject }}</strong>
+        <div class="meta">{% if c.date %}For {{ c.date.strftime('%d %b %Y') }} · {% endif %}Sent {{ c.created_at.strftime('%d %b, %I:%M %p') }}</div></div>
+      <span class="pill {{ c.status }}">{{ 'Waiting for admin' if c.status == 'open' else 'Resolved' }}</span>
+    </div>
+    <p class="msg">{{ c.message }}</p>
+    {% if c.requested_in or c.requested_out %}
+      <p class="meta" style="margin:8px 0 0">You asked for: check-in <strong>{{ c.requested_in or '—' }}</strong>, check-out <strong>{{ c.requested_out or '—' }}</strong></p>
+    {% endif %}
+    {% if c.date %}
+      <p class="meta" style="margin:4px 0 0">Now recorded: {% if rec %}check-in <strong>{{ rec.check_in | t }}</strong>, check-out <strong>{{ rec.check_out | t }}</strong>{% else %}<strong>no attendance</strong>{% endif %}</p>
+    {% endif %}
+    {% if c.admin_reply %}<div class="reply"><strong>Admin:</strong> {{ c.admin_reply }}</div>{% endif %}
+  </div>
+{% else %}
+  <p class="muted">No concerns yet.</p>
+{% endfor %}
+{% endblock %}
+{% block scripts %}
+<script>
+// Time fields are not needed for "Camera not recognizing" / "Other"
+const subj = document.getElementById("cSubject"), tf = document.getElementById("timeFields");
+const sync = () => {
+  const hide = ["Camera not recognizing my face", "Other"].includes(subj.value);
+  tf.style.display = hide ? "none" : "";
+  tf.querySelectorAll("input").forEach(i => (i.disabled = hide));
+};
+subj.addEventListener("change", sync); sync();
+// Changing the date reloads the page to show what is recorded for that day
+document.getElementById("cDate").addEventListener("change", e => {
+  if (e.target.value) location.href = "?date=" + e.target.value;
+});
+</script>
+{% endblock %}

@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Register Face{% endblock %}
+{% block content %}
+<h1>Register face{% if target.id != current_user.id %} — {{ target.name }}{% endif %}</h1>
+<p class="sub">
+  {% if target.has_face %}A face is already registered. Capturing again will replace it.{% else %}No face registered yet.{% endif %}
+  Look straight at the camera in good light. Turn your head slightly between captures.
+</p>
+
+<div class="card">
+  <div class="cam-box">
+    <video id="video" autoplay muted playsinline></video>
+    <canvas id="overlay"></canvas>
+  </div>
+  <div class="samples" id="samples"></div>
+  <div class="status-line" id="status">Loading face models…</div>
+  <button class="btn" id="captureBtn" disabled>Capture sample</button>
+  <button class="btn green" id="saveBtn" disabled>Save face</button>
+  <button class="btn secondary" id="resetBtn">Start over</button>
+  <a class="btn secondary" href="{{ back_url }}">Back</a>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='vendor/face-api.js') }}"></script>
+<script src="{{ url_for('static', filename='js/face.js') }}"></script>
+<script>window.REGISTER = { postUrl: "{{ post_url }}", backUrl: "{{ back_url }}", needed: 5 };</script>
+<script src="{{ url_for('static', filename='js/register.js') }}"></script>
+{% endblock %}

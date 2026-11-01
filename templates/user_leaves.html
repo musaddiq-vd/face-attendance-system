@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}My Leave{% endblock %}
+{% block content %}
+<h1>Leave</h1>
+<p class="sub">Ask for leave here. Once the admin approves it, those days show as "On leave" instead of "Absent".</p>
+
+<div class="stats">
+  <div class="stat green"><div class="label">Approved leave this year (working days)</div><div class="value">{{ taken }}</div></div>
+  <div class="stat amber"><div class="label">Waiting for admin</div><div class="value">{{ leaves | selectattr('status', 'equalto', 'pending') | list | length }}</div></div>
+</div>
+
+<div class="card">
+  <h2>Ask for leave</h2>
+  <form method="post">
+    <input type="hidden" name="action" value="apply">
+    <div class="grid-2">
+      <div class="field"><label>From *</label><input type="date" name="start_date" id="lStart" min="{{ min_date.isoformat() }}" required></div>
+      <div class="field"><label>To *</label><input type="date" name="end_date" id="lEnd" min="{{ min_date.isoformat() }}" required></div>
+      <div class="field"><label>Type *</label>
+        <select name="leave_type" required>
+          {% for key, label in leave_types.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+        </select></div>
+    </div>
+    <div class="checks" style="margin-bottom:12px">
+      <label><input type="checkbox" name="half_day" value="1" id="lHalf"> <strong>Half day</strong> — only for one day (From and To must be the same)</label>
+    </div>
+    <div class="field"><label>Reason *</label><textarea name="reason" required maxlength="1000" placeholder="e.g. Family function, fever, travel…"></textarea></div>
+    <button class="btn">Send leave request</button>
+  </form>
+</div>
+
+<h2 style="font-size:16px">My leave requests</h2>
+{% for lv in leaves %}
+  <div class="concern card">
+    <div class="head">
+      <div><strong>{{ leave_types.get(lv.leave_type, 'Leave') }}{% if lv.half_day %} (half day){% endif %}</strong> ·
+        {{ lv.start_date.strftime('%d %b %Y') }}{% if lv.end_date != lv.start_date %} – {{ lv.end_date.strftime('%d %b %Y') }}{% endif %}
+        <div class="meta">{{ '0.5' if lv.half_day else working_days(lv.start_date, lv.end_date) }} working day(s) · Sent {{ lv.created_at.strftime('%d %b, %I:%M %p') }}</div></div>
+      <span class="pill {{ lv.status }}">{{ 'Waiting for admin' if lv.status == 'pending' else lv.status }}</span>
+    </div>
+    <p class="msg">{{ lv.reason }}</p>
+    {% if lv.admin_reply %}<div class="reply"><strong>Admin:</strong> {{ lv.admin_reply }}</div>{% endif %}
+    {% if lv.status == 'pending' %}
+      <form method="post" style="margin-top:10px" onsubmit="return confirm('Cancel this leave request?')">
+        <input type="hidden" name="action" value="cancel"><input type="hidden" name="id" value="{{ lv.id }}">
+        <button class="btn small secondary">Cancel request</button>
+      </form>
+    {% endif %}
+  </div>
+{% else %}
+  <p class="muted">No leave requests yet.</p>
+{% endfor %}
+{% endblock %}
+{% block scripts %}
+<script>
+// "To" date cannot be before "From" date; it defaults to the same day
+const s = document.getElementById("lStart"), e = document.getElementById("lEnd"), half = document.getElementById("lHalf");
+s.addEventListener("change", () => { e.min = s.value; if (!e.value || e.value < s.value || half.checked) e.value = s.value; });
+// Half day = one day only, so lock "To" to the "From" date
+half.addEventListener("change", () => { if (half.checked) e.value = s.value; e.readOnly = half.checked; });
+</script>
+{% endblock %}

@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}{{ u.name }} · Admin{% endblock %}
+{% from "_avatar.html" import avatar %}
+{% block content %}
+<p><a href="{{ url_for('admin_employees') }}">← All employees</a></p>
+<h1 style="display:flex;align-items:center">{{ avatar(u, 48) }}{{ u.name }}&nbsp;<span class="muted" style="font-weight:400">{{ u.emp_code }}</span></h1>
+<p class="sub">
+  <span class="pill {{ 'yes' if u.active else 'inactive' }}">{{ 'Active' if u.active else 'Inactive' }}</span>
+  <span class="pill {{ 'yes' if u.has_face else 'no' }}">Face {{ 'registered (' ~ u.faces|length ~ ' samples)' if u.has_face else 'missing' }}</span>
+  &nbsp;<a href="{{ url_for('admin_attendance', employee=u.id) }}">View attendance →</a>
+</p>
+
+<div class="card">
+  <h2>Details</h2>
+  <form method="post">
+    <div class="grid-2">
+      <div class="field"><label>Full name</label><input name="name" value="{{ u.name }}" required></div>
+      <div class="field"><label>Email</label><input name="email" type="email" value="{{ u.email or '' }}"></div>
+      <div class="field"><label>Department</label><input name="department" value="{{ u.department or '' }}"></div>
+      <div class="field"><label>Role</label>
+        <select name="role" {{ 'disabled' if u.id == current_user.id }}>
+          <option value="employee" {{ 'selected' if u.role == 'employee' }}>Employee</option>
+          <option value="admin" {{ 'selected' if u.role == 'admin' }}>Admin</option>
+        </select></div>
+      <div class="field"><label>New password (leave empty to keep)</label><input name="password" type="text" minlength="6"></div>
+    </div>
+    <button class="btn">Save changes</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Profile photo (optional)</h2>
+  <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+    {{ avatar(u, 72) }}
+    <form method="post" enctype="multipart/form-data" class="inline">
+      <input type="hidden" name="action" value="upload_photo">
+      <div class="field"><label>JPG, PNG or WebP (max 3 MB)</label><input type="file" name="photo" accept="image/jpeg,image/png,image/webp" required></div>
+      <button class="btn">{{ 'Change photo' if u.photo else 'Upload photo' }}</button>
+    </form>
+    {% if u.photo %}
+    <form method="post"><input type="hidden" name="action" value="remove_photo"><button class="btn secondary">Remove photo</button></form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <h2>Face & account</h2>
+  <a class="btn" href="{{ url_for('admin_employee_face', uid=u.id) }}">{{ 'Re-register face' if u.has_face else 'Register face' }} with this computer's camera</a>
+  {% if u.has_face %}
+  <form method="post" style="display:inline" onsubmit="return confirm('Remove face data for this employee?')">
+    <input type="hidden" name="action" value="clear_face"><button class="btn secondary">Remove face data</button>
+  </form>
+  {% endif %}
+  {% if u.id != current_user.id %}
+  <form method="post" style="display:inline">
+    <input type="hidden" name="action" value="toggle">
+    <button class="btn {{ 'danger' if u.active else 'green' }}">{{ 'Deactivate' if u.active else 'Activate' }} account</button>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

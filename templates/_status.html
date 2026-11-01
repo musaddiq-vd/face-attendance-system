@@ -1,0 +1,14 @@
+{# Status pill + flag pills + admin correction info. Needs: r (row with status, flags, holiday, record) #}
+{% if r.status == 'off' %}<span class="pill off">Weekly off</span>
+{% elif r.status == 'holiday' %}<span class="pill holiday">{{ r.holiday }}</span>
+{% elif r.status == 'leave' %}<span class="pill leave">On leave · {{ r.holiday }}</span>
+{% elif r.status %}<span class="pill {{ r.status }}">{{ r.status | status_label }}</span>{% endif %}
+{% for f in r.flags %}<span class="pill flag">{{ f | flag_label }}</span>{% endfor %}
+{% set rec = r.record %}
+{% if rec and rec.edited_at %}
+  <span class="pill edited" title="Corrected on {{ rec.edited_at.strftime('%d %b, %I:%M %p') }}">Corrected by admin</span>
+  <div class="was">Was:
+    {% if rec.was_absent %}absent
+    {% else %}in {{ rec.original_in | t }} · out {{ rec.original_out | t }}{% endif %}
+  </div>
+{% endif %}

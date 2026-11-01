@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Login · Face Attendance{% endblock %}
+{% block main_class %}login-wrap{% endblock %}
+{% block flashes %}{% endblock %}
+{% block content %}
+<div class="card login-card">
+  <h1>Face<span style="color:var(--primary)">Attend</span></h1>
+  <p class="sub">Choose how you want to log in</p>
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for cat, msg in messages %}<div class="flash {{ cat }}">{{ msg }}</div>{% endfor %}
+  {% endwith %}
+
+  <div class="tabs" role="tablist">
+    <button type="button" class="tab {{ 'active' if role == 'employee' }}" data-role="employee">Employee login</button>
+    <button type="button" class="tab {{ 'active' if role == 'admin' }}" data-role="admin">Admin login</button>
+  </div>
+
+  <form method="post">
+    <input type="hidden" name="role" id="role" value="{{ role }}">
+    <div class="field">
+      <label for="emp_code" id="idLabel">{{ 'Admin ID' if role == 'admin' else 'Employee ID' }}</label>
+      <input id="emp_code" name="emp_code" required autofocus autocomplete="username" value="{{ emp_code }}">
+    </div>
+    <div class="field">
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" required autocomplete="current-password">
+    </div>
+    <button class="btn" type="submit" id="loginBtn">{{ 'Log in as Admin' if role == 'admin' else 'Log in as Employee' }}</button>
+  </form>
+  <p class="muted" id="hint" style="font-size:13px; text-align:center; margin-bottom:0">
+    {{ 'Manage employees, attendance and concerns.' if role == 'admin' else 'See your attendance and raise concerns.' }}
+  </p>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const texts = {
+  employee: ["Employee ID", "Log in as Employee", "See your attendance and raise concerns."],
+  admin: ["Admin ID", "Log in as Admin", "Manage employees, attendance and concerns."],
+};
+document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => {
+  document.querySelectorAll(".tab").forEach(x => x.classList.toggle("active", x === t));
+  const r = t.dataset.role;
+  document.getElementById("role").value = r;
+  [idLabel.textContent, loginBtn.textContent, hint.textContent] = texts[r];
+  document.getElementById("emp_code").focus();
+}));
+</script>
+{% endblock %}

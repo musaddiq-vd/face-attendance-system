@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Leave · Admin{% endblock %}
+{% from "_avatar.html" import avatar %}
+{% block content %}
+<div class="row-between">
+  <div><h1>Leave requests</h1><p class="sub" style="margin:0">Approved days show as "On leave" in attendance instead of "Absent".</p></div>
+  <form class="inline" method="get">
+    <div class="field"><label>Show</label>
+      <select name="status" onchange="this.form.submit()">
+        {% for key, label in [('pending', 'Waiting'), ('approved', 'Approved'), ('rejected', 'Rejected'), ('cancelled', 'Cancelled'), ('all', 'All')] %}
+          <option value="{{ key }}" {{ 'selected' if status == key }}>{{ label }}</option>
+        {% endfor %}
+      </select></div>
+  </form>
+</div>
+
+{% for lv in leaves %}
+<div class="concern card">
+  <div class="head">
+    <div>{{ avatar(lv.user) }}<strong>{{ lv.user.name }}</strong> <span class="muted">{{ lv.user.emp_code }}</span> ·
+      {{ leave_types.get(lv.leave_type, 'Leave') }}{% if lv.half_day %} <span class="pill leave">Half day</span>{% endif %}
+      <div class="meta">
+        <strong>{{ lv.start_date.strftime('%a, %d %b %Y') }}{% if lv.end_date != lv.start_date %} – {{ lv.end_date.strftime('%a, %d %b %Y') }}{% endif %}</strong>
+        · {{ '0.5' if lv.half_day else working_days(lv.start_date, lv.end_date) }} working day(s)
+        · Sent {{ lv.created_at.strftime('%d %b, %I:%M %p') }}</div></div>
+    <span class="pill {{ lv.status }}">{{ 'Waiting' if lv.status == 'pending' else lv.status }}</span>
+  </div>
+  <p class="msg">{{ lv.reason }}</p>
+  {% if worked[lv.id] %}
+    <p class="meta" style="margin:8px 0 0">⚠ The camera recorded attendance on {{ worked[lv.id] }} of these days. Those days stay as present.</p>
+  {% endif %}
+
+  {% if lv.status == 'pending' %}
+    <form method="post" action="{{ url_for('admin_leave_decide', lid=lv.id, status=status) }}" style="margin-top:12px">
+      <div class="field"><label>Reply to employee (optional)</label><input name="reply" maxlength="500"></div>
+      <button class="btn green" name="action" value="approve">✓ Approve</button>
+      <button class="btn danger" name="action" value="reject">✗ Reject</button>
+    </form>
+  {% else %}
+    {% if lv.decided_by %}<p class="meta" style="margin:8px 0 0">{{ lv.status | capitalize }} by {{ lv.decided_by }} on {{ lv.decided_at.strftime('%d %b, %I:%M %p') }}</p>{% endif %}
+    {% if lv.admin_reply %}<div class="reply"><strong>Reply:</strong> {{ lv.admin_reply }}</div>{% endif %}
+    {% if lv.status in ('approved', 'rejected') %}
+      <form method="post" action="{{ url_for('admin_leave_decide', lid=lv.id, status=status) }}" style="margin-top:10px">
+        <input type="hidden" name="reply" value="{{ lv.admin_reply or '' }}">
+        {% if lv.status == 'approved' %}
+          <button class="btn small secondary" name="action" value="reject" onclick="return confirm('Change this leave to rejected?')">Change to rejected</button>
+        {% else %}
+          <button class="btn small secondary" name="action" value="approve" onclick="return confirm('Change this leave to approved?')">Change to approved</button>
+        {% endif %}
+      </form>
+    {% endif %}
+  {% endif %}
+</div>
+{% else %}
+  <p class="muted">No {{ '' if status == 'all' else status }} leave requests.</p>
+{% endfor %}
+{% endblock %}
