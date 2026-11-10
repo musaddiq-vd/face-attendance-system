@@ -4,6 +4,7 @@
 {% block flashes %}{% endblock %}
 {% block content %}
 <div class="card login-card">
+  <img class="login-logo" src="{{ url_for('static', filename='img/logo.svg') }}" alt="" width="52" height="52">
   <h1>Face<span style="color:var(--primary)">Attend</span></h1>
   <p class="sub">Choose how you want to log in</p>
   {% with messages = get_flashed_messages(with_categories=true) %}
@@ -25,9 +26,12 @@
       <label for="password">Password</label>
       <input id="password" name="password" type="password" required autocomplete="current-password">
     </div>
+    <div class="checks" style="margin-bottom:10px">
+      <label><input type="checkbox" id="showPw"> Show password</label>
+    </div>
     <button class="btn" type="submit" id="loginBtn">{{ 'Log in as Admin' if role == 'admin' else 'Log in as Employee' }}</button>
   </form>
-  <p class="muted" id="hint" style="font-size:13px; text-align:center; margin-bottom:0">
+  <p class="muted" id="hint" style="font-size:13px; text-align:center; margin:14px 0 0">
     {{ 'Manage employees, attendance and concerns.' if role == 'admin' else 'See your attendance and raise concerns.' }}
   </p>
 </div>
@@ -45,5 +49,8 @@ document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () =>
   [idLabel.textContent, loginBtn.textContent, hint.textContent] = texts[r];
   document.getElementById("emp_code").focus();
 }));
+document.getElementById("showPw").addEventListener("change", e => {
+  document.getElementById("password").type = e.target.checked ? "text" : "password";
+});
 </script>
 {% endblock %}

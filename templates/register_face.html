@@ -1,23 +1,36 @@
 {% extends "base.html" %}
 {% block title %}Register Face{% endblock %}
 {% block content %}
-<h1>Register face{% if target.id != current_user.id %} — {{ target.name }}{% endif %}</h1>
+<p><a href="{{ back_url }}">← Back to {{ target.name }}</a></p>
+<h1>Register face — {{ target.name }}</h1>
 <p class="sub">
-  {% if target.has_face %}A face is already registered. Capturing again will replace it.{% else %}No face registered yet.{% endif %}
-  Look straight at the camera in good light. Turn your head slightly between captures.
+  {% if target.has_face %}A face is already registered. Saving again will replace it.{% else %}No face registered yet.{% endif %}
+  Five quick captures from slightly different angles make the kiosk reliable.
 </p>
 
 <div class="card">
-  <div class="cam-box">
-    <video id="video" autoplay muted playsinline></video>
-    <canvas id="overlay"></canvas>
+  <div class="register-grid">
+    <div class="cam-box">
+      <video id="video" autoplay muted playsinline></video>
+      <canvas id="overlay"></canvas>
+    </div>
+    <div>
+      <p class="muted" style="margin:0 0 2px; font-size:13px; font-weight:600" id="stepLabel">Getting ready</p>
+      <p class="pose" id="pose">Loading face models…</p>
+      <div class="samples" id="samples"></div>
+      <div class="status-line" id="status" role="status"></div>
+      <p>
+        <button class="btn" id="captureBtn" disabled>Capture</button>
+        <button class="btn green" id="saveBtn" disabled>Save face</button>
+        <button class="btn secondary" id="resetBtn">Start over</button>
+      </p>
+      <ul class="tips">
+        <li>Stand where the light falls on the face, not behind it.</li>
+        <li>Remove sunglasses, masks and caps.</li>
+        <li>Wait for the <strong style="color:var(--green)">green box</strong>, then press Capture (or the space bar).</li>
+      </ul>
+    </div>
   </div>
-  <div class="samples" id="samples"></div>
-  <div class="status-line" id="status">Loading face models…</div>
-  <button class="btn" id="captureBtn" disabled>Capture sample</button>
-  <button class="btn green" id="saveBtn" disabled>Save face</button>
-  <button class="btn secondary" id="resetBtn">Start over</button>
-  <a class="btn secondary" href="{{ back_url }}">Back</a>
 </div>
 {% endblock %}
 {% block scripts %}

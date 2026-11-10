@@ -1,9 +1,11 @@
 (async () => {
-  const { key, scanUrl, savePhotos } = window.KIOSK;
+  const { key, scanUrl, pingUrl, savePhotos } = window.KIOSK;
   const video = document.getElementById("video");
   const overlay = document.getElementById("overlay");
   const resultEl = document.getElementById("result");
   const logEl = document.getElementById("log");
+  const countEl = document.getElementById("count");
+  const guideEl = document.getElementById("guide");
 
   // Clock
   const clockEl = document.getElementById("clock"), todayEl = document.getElementById("today");
@@ -38,10 +40,54 @@
     show("", "Starting camera…", "Please allow camera access", 0);
     await Face.startCamera(video);
   } catch (e) {
-    show("unknown", "Camera / model error", e.message || String(e), 0);
+    if (e.name === "NotAllowedError") {
+      show("unknown", "Camera is blocked", "Allow the camera in the browser's address bar, then reload this page", 0);
+    } else if (e.name === "NotFoundError") {
+      show("unknown", "No camera found", "Connect a webcam, then reload this page", 0);
+    } else {
+      show("unknown", "Camera / model error", e.message || String(e), 0);
+    }
     return;
   }
   idle();
+  guideEl.hidden = false;
+
+  // Tell the server this kiosk is alive (the admin dashboard shows it) and show today's count
+  async function ping() {
+    try {
+      const res = await fetch(pingUrl, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key }),
+      });
+      const d = await res.json();
+      countEl.className = "";
+      countEl.textContent = `${d.checked_in} of ${d.total} checked in today`;
+    } catch (_) {
+      countEl.className = "offline";
+      countEl.textContent = "No connection to the server";
+    }
+  }
+  ping(); setInterval(ping, 30000);
+
+  // Keep the screen awake while the kiosk is open (supported in Chrome and Edge)
+  async function stayAwake() {
+    try { if ("wakeLock" in navigator) await navigator.wakeLock.request("screen"); } catch (_) { /* not allowed */ }
+  }
+  stayAwake();
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) stayAwake(); });
+
+  // Short sound so people know the scan worked without looking at the screen
+  let audio = null;
+  function beep(freq) {
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      const osc = audio.createOscillator(), gain = audio.createGain();
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.15, audio.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + 0.25);
+      osc.connect(gain).connect(audio.destination);
+      osc.start(); osc.stop(audio.currentTime + 0.25);
+    } catch (_) { /* sound is optional */ }
+  }
 
   // A face must be seen in this many consecutive frames before we send it,
   // so people just walking past the edge of the frame are ignored.
@@ -62,6 +108,7 @@
         const good = r && bigEnough && r.detection.score > 0.75;
         stable = good ? stable + 1 : 0;
         Face.drawBox(overlay, video, r, good ? "#4ade80" : "#facc15", r && !bigEnough ? "Come closer" : "");
+        guideEl.hidden = Boolean(r);  // the oval is only a hint while nobody is in front of the camera
         if (good && stable >= STABLE_FRAMES) {
           stable = 0;
           await send(Array.from(r.descriptor), savePhotos ? Face.snapshot(video) : null);
@@ -98,9 +145,11 @@
         const late = d.status === "late";
         show(late ? "late" : "in", `Welcome, ${d.name}!`, `Checked in at ${d.time}${late ? " · Late" : ""}`);
         addLog(`✓ ${d.name} in ${d.time}`);
+        beep(880); ping();
       } else if (d.action === "check_out") {
         show(d.early ? "late" : "out", `Goodbye, ${d.name}!`, `Checked out at ${d.time}${d.early ? " · Early leave" : ""}`);
         addLog(`↩ ${d.name} out ${d.time}`);
+        beep(660);
       } else if (d.action === "locked") {
         show("repeat", `Hi ${d.name}`, `Today's attendance was set by admin (out ${d.time})`, 3000);
       } else {

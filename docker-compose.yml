@@ -1,0 +1,16 @@
+# Start:  docker compose up -d      Stop:  docker compose down
+# The admin password is read from a .env file next to this file (see .env.example).
+services:
+  attendance:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      ADMIN_ID: ${ADMIN_ID:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in the .env file}
+    volumes:
+      - attendance-data:/data
+    restart: unless-stopped
+
+volumes:
+  attendance-data:

@@ -9,19 +9,60 @@
 {% for w in warnings %}<div class="flash error">⚠ {{ w }}</div>{% endfor %}
 {% if holiday %}<div class="flash success">Today is a holiday: {{ holiday.name }}</div>{% endif %}
 
+{% if steps %}
+<div class="card">
+  <h2>Getting started</h2>
+  <ol class="steps">
+    {% for s in steps %}
+    <li class="{{ 'done' if s.done }}">
+      <span class="num">{{ '✓' if s.done else loop.index }}</span>
+      <div class="body"><div class="title">{{ s.title }}</div>{% if not s.done %}<div class="hint">{{ s.hint }}</div>{% endif %}</div>
+      {% if not s.done %}<a class="btn small secondary" href="{{ s.url }}" {{ 'target="_blank"' | safe if s.action == 'Open kiosk' }}>{{ s.action }}</a>{% endif %}
+    </li>
+    {% endfor %}
+  </ol>
+</div>
+{% endif %}
+
 <div class="stats">
   <div class="stat"><div class="label">Active employees</div><div class="value">{{ stats.total }}</div></div>
-  <div class="stat green"><div class="label">Checked in (on time + late)</div><div class="value">{{ stats.present }}</div></div>
+  <div class="stat green"><div class="label">Checked in</div><div class="value">{{ stats.present }}</div></div>
   <div class="stat amber"><div class="label">Late</div><div class="value">{{ stats.late }}</div></div>
   <div class="stat"><div class="label">On leave</div><div class="value">{{ stats.on_leave }}</div></div>
   <div class="stat red"><div class="label">Not in yet</div><div class="value">{{ stats.absent }}</div></div>
 </div>
 
+{% if stats.total %}
 <div class="card">
-  <h2>Entrance camera (kiosk)</h2>
-  <p class="muted" style="margin-top:0">Open this link on the computer at the entrance and keep it on full screen:</p>
-  <p><code class="kiosk">{{ kiosk_url }}</code> &nbsp; <a class="btn small" href="{{ kiosk_url }}" target="_blank">Open kiosk</a></p>
-  {% if stats.no_face %}<p class="muted">{{ stats.no_face }} employee(s) have not registered their face yet.</p>{% endif %}
+  <div class="progress" role="img" aria-label="{{ stats.present }} of {{ stats.total }} employees checked in">
+    <span class="p-green" style="width:{{ (stats.present - stats.late) * 100 / stats.total }}%"></span>
+    <span class="p-amber" style="width:{{ stats.late * 100 / stats.total }}%"></span>
+    <span class="p-teal" style="width:{{ stats.on_leave * 100 / stats.total }}%"></span>
+  </div>
+  <div class="legend">
+    <span><i style="background:var(--green)"></i>On time {{ stats.present - stats.late }}</span>
+    <span><i style="background:#d99a2b"></i>Late {{ stats.late }}</span>
+    <span><i style="background:#26a69a"></i>On leave {{ stats.on_leave }}</span>
+    <span><i style="background:#cfd6e3"></i>Not in yet {{ stats.absent }}</span>
+  </div>
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="row-between" style="margin-bottom:10px; align-items:center">
+    <h2 style="margin:0">Entrance camera (kiosk)</h2>
+    {% if kiosk_online %}<span class="dot-status on">Kiosk is running</span>
+    {% elif kiosk_seen %}<span class="dot-status off">Kiosk offline · last seen {{ kiosk_seen | t }}</span>
+    {% else %}<span class="dot-status off">Kiosk not opened yet</span>{% endif %}
+  </div>
+  <p class="muted" style="margin-top:0">Open this link on the computer at the entrance and press F11 for full screen:</p>
+  <div class="kiosk-row">
+    <code class="kiosk" id="kioskUrl">{{ kiosk_url }}</code>
+    <button class="btn small secondary" type="button" id="copyKiosk">Copy link</button>
+    <a class="btn small" href="{{ kiosk_url }}" target="_blank">Open kiosk</a>
+  </div>
+  {% if stats.no_face %}<p class="muted" style="margin-bottom:0">{{ stats.no_face }} employee(s) have not registered their face yet.
+    <a href="{{ url_for('admin_employees') }}">Register now →</a></p>{% endif %}
 </div>
 
 <div class="card table-wrap">
@@ -39,9 +80,22 @@
         <td><span class="pill {{ 'yes' if r.user.has_face else 'no' }}">{{ 'Registered' if r.user.has_face else 'Missing' }}</span></td>
       </tr>
     {% else %}
-      <tr><td colspan="6" class="muted">No employees yet. <a href="{{ url_for('admin_employees') }}">Add employees →</a></td></tr>
+      <tr><td colspan="6" class="empty">No employees yet. <a href="{{ url_for('admin_employees') }}">Add your first employee →</a></td></tr>
     {% endfor %}
     </tbody>
   </table>
 </div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.getElementById("copyKiosk").addEventListener("click", async e => {
+  try {
+    await navigator.clipboard.writeText(document.getElementById("kioskUrl").textContent);
+    e.target.textContent = "Copied ✓";
+  } catch (_) {
+    e.target.textContent = "Select and copy the link";
+  }
+  setTimeout(() => (e.target.textContent = "Copy link"), 2000);
+});
+</script>
 {% endblock %}

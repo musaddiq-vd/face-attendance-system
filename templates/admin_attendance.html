@@ -48,7 +48,7 @@
               data-status="{{ rec.status if rec else '' }}">Edit</button></td>
       </tr>
     {% else %}
-      <tr><td colspan="8" class="muted">No employees yet.</td></tr>
+      <tr><td colspan="8" class="empty">No employees yet. <a href="{{ url_for('admin_employees') }}">Add your first employee →</a></td></tr>
     {% endfor %}
     </tbody>
   </table>

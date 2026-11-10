@@ -22,6 +22,7 @@ os.environ["KIOSK_KEY"] = "test-kiosk-key"
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import app as A  # noqa: E402
+A.app.logger.setLevel("ERROR")  # keep the test output clean
 from models import Attendance, Concern, User, db  # noqa: E402
 
 KEY = A.Config.KIOSK_KEY
@@ -56,6 +57,8 @@ class AppTestCase(unittest.TestCase):
         A._face_cache = None
         A._failed_logins.clear()
         A._last_photo_cleanup = None
+        A._kiosk_seen = None
+        A._has_admin = False
         self.set_settings(scan_cooldown_seconds=0)
         # Email: off by default; tests that need it turn it on and capture messages
         A.Config.SMTP_HOST, A.Config.SMTP_FROM, A.Config.EMAIL_ASYNC = "", "", False
@@ -632,6 +635,92 @@ class AppTestCase(unittest.TestCase):
         self.assertTrue(rows[0].startswith("Employee ID,Name"))
         self.assertTrue(any(line.startswith("E1,Ravi,IT,1,1,") for line in rows))
         self.assertTrue(any(line.startswith("'=E2,Meena") for line in rows))  # no spreadsheet formulas
+
+    # ---------------- first-run setup, kiosk status, health
+
+    def remove_admins(self):
+        with A.app.app_context():
+            User.query.filter_by(role="admin").delete()
+            db.session.commit()
+        A._has_admin = False
+
+    def test_first_run_setup_creates_admin_once(self):
+        self.remove_admins()
+        c = A.app.test_client()
+        self.assertTrue(c.get("/login").headers["Location"].endswith("/setup"))
+        self.assertIn("Create admin account", c.get("/setup").get_data(as_text=True))
+        form = {"emp_code": "boss", "name": "Asha", "password": "long-password", "confirm": "different"}
+        self.post(c, "/setup", form)                                  # passwords differ
+        self.post(c, "/setup", {**form, "password": "short", "confirm": "short"})
+        with A.app.app_context():
+            self.assertIsNone(User.query.filter_by(role="admin").first())
+        r = self.post(c, "/setup", {**form, "confirm": "long-password"})
+        self.assertTrue(r.headers["Location"].endswith("/admin"))
+        page = c.get("/admin").get_data(as_text=True)                 # logged in straight away
+        self.assertIn("Getting started", page)
+        self.assertIn("Add your employees", page)
+        # The page is closed for good once an admin exists
+        self.assertTrue(A.app.test_client().get("/setup").headers["Location"].endswith("/login"))
+        self.post(A.app.test_client(), "/setup", {**form, "emp_code": "evil", "confirm": "long-password"})
+        with A.app.app_context():
+            self.assertEqual(User.query.filter_by(role="admin").count(), 1)
+
+    def test_setup_only_from_the_server_computer(self):
+        self.remove_admins()
+        c = A.app.test_client()
+        r = c.get("/setup", environ_base={"REMOTE_ADDR": "192.168.1.50"})
+        self.assertEqual(r.status_code, 403)
+        self.assertNotIn("Create admin account", r.get_data(as_text=True))
+        with c.session_transaction() as s:
+            s["csrf"] = "t"
+        c.post("/setup", environ_base={"REMOTE_ADDR": "192.168.1.50"},
+               data={"csrf_token": "t", "emp_code": "x", "name": "X", "password": "long-password",
+                     "confirm": "long-password"})
+        with A.app.app_context():
+            self.assertIsNone(User.query.filter_by(role="admin").first())
+
+    def test_admin_created_from_environment(self):
+        self.remove_admins()
+        os.environ["ADMIN_PASSWORD"] = "from-env-password"
+        try:
+            with A.app.app_context():
+                A.create_admin_from_env()
+                A.create_admin_from_env()  # second call does nothing
+                self.assertEqual(User.query.filter_by(role="admin").count(), 1)
+        finally:
+            del os.environ["ADMIN_PASSWORD"]
+        self.login("admin", "from-env-password", "admin")
+
+    def test_logout_needs_post(self):
+        admin = self.admin()
+        self.assertEqual(admin.get("/logout").status_code, 405)
+        self.assertEqual(admin.get("/admin").status_code, 200)   # still logged in
+        self.post(admin, "/logout")
+        self.assertEqual(admin.get("/admin").status_code, 302)
+
+    def test_health_check(self):
+        r = A.app.test_client().get("/healthz")
+        self.assertEqual((r.status_code, r.json), (200, {"status": "ok"}))
+
+    def test_kiosk_ping_shows_on_dashboard(self):
+        admin = self.admin()
+        self.assertIn("Kiosk not opened yet", admin.get("/admin").get_data(as_text=True))
+        c = A.app.test_client()
+        self.assertEqual(c.post("/api/kiosk/ping", json={"key": "wrong"}).status_code, 403)
+        self.register_face(self.emp_id, face(1))
+        self.scan(jitter(face(1)))
+        r = c.post("/api/kiosk/ping", json={"key": KEY})
+        self.assertEqual(r.json, {"ok": True, "total": 1, "checked_in": 1})
+        self.assertIn("Kiosk is running", admin.get("/admin").get_data(as_text=True))
+        A._kiosk_seen -= 600
+        self.assertIn("Kiosk offline", admin.get("/admin").get_data(as_text=True))
+
+    def test_getting_started_hides_when_done(self):
+        admin = self.admin()
+        self.assertIn("Getting started", admin.get("/admin").get_data(as_text=True))
+        self.register_face(self.emp_id, face(1))
+        self.scan(jitter(face(1)))
+        self.assertNotIn("Getting started", admin.get("/admin").get_data(as_text=True))
 
     def test_face_count_follows_registration(self):
         self.register_face(self.emp_id, face(1))

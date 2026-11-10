@@ -36,7 +36,7 @@
           <span class="pill {{ 'present' if s.percent >= 90 else ('late' if s.percent >= 75 else 'absent') }}">{{ s.percent }}%</span>{% endif %}</td>
       </tr>
     {% else %}
-      <tr><td colspan="10" class="muted">No employees yet.</td></tr>
+      <tr><td colspan="10" class="empty">No employees yet. <a href="{{ url_for('admin_employees') }}">Add your first employee →</a></td></tr>
     {% endfor %}
     </tbody>
   </table>

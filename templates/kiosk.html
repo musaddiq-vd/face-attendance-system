@@ -4,12 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Entrance Kiosk · Face Attendance</title>
+  <link rel="icon" href="{{ url_for('static', filename='img/logo.svg') }}" type="image/svg+xml">
   <style>
     * { box-sizing: border-box; }
     html, body { margin: 0; height: 100%; background: #0d1117; color: #fff; font-family: "Segoe UI", system-ui, sans-serif; overflow: hidden; }
     .wrap { display: grid; grid-template-rows: auto 1fr auto; height: 100%; }
     header { display: flex; justify-content: space-between; align-items: center; padding: 18px 28px; }
-    .brand { font-size: 22px; font-weight: 700; } .brand span { color: #6c8cff; }
+    .brand { font-size: 22px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+    .brand span { color: #6c8cff; margin-left: -10px; }
+    .brand small { font-weight: 400; color: #9aa4b8; font-size: 18px; }
     .clock { text-align: right; }
     .clock .time { font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; }
     .clock .date { color: #9aa4b8; }
@@ -27,26 +30,32 @@
     .result.late { background: rgba(183,121,31,.95); }
     .result.repeat { background: rgba(80,88,104,.92); }
     .result.unknown { background: rgba(214,69,69,.92); }
-    footer { padding: 14px 28px; color: #9aa4b8; display: flex; justify-content: space-between; font-size: 14px; }
+    /* Oval that shows people where to stand */
+    .guide { position: absolute; left: 50%; top: 44%; width: min(30vh, 26%); aspect-ratio: 3/4; transform: translate(-50%, -50%);
+      border: 3px dashed rgba(255,255,255,.35); border-radius: 50%; pointer-events: none; }
+    footer { padding: 14px 28px; color: #9aa4b8; display: flex; justify-content: space-between; gap: 18px; font-size: 14px; }
     #log { display: flex; gap: 18px; overflow: hidden; white-space: nowrap; }
+    #count { white-space: nowrap; font-variant-numeric: tabular-nums; }
+    #count.offline { color: #f87171; }
   </style>
 </head>
 <body>
 <div class="wrap">
   <header>
-    <div class="brand">Face<span>Attend</span> · Entrance</div>
+    <div class="brand"><img src="{{ url_for('static', filename='img/logo.svg') }}" alt="" width="32" height="32">Face<span>Attend</span> <small>Entrance</small></div>
     <div class="clock"><div class="time" id="clock">--:--</div><div class="date" id="today"></div></div>
   </header>
   <div class="stage">
     <video id="video" autoplay muted playsinline></video>
     <canvas id="overlay"></canvas>
+    <div class="guide" id="guide" hidden></div>
     <div class="result" id="result"><div class="big">Starting camera…</div><div class="small">Please wait</div></div>
   </div>
-  <footer><div id="log"></div></footer>
+  <footer><div id="log"></div><div id="count"></div></footer>
 </div>
 <script src="{{ url_for('static', filename='vendor/face-api.js') }}"></script>
 <script src="{{ url_for('static', filename='js/face.js') }}"></script>
-<script>window.KIOSK = { key: {{ key|tojson }}, scanUrl: "{{ url_for('kiosk_scan') }}",
+<script>window.KIOSK = { key: {{ key|tojson }}, scanUrl: "{{ url_for('kiosk_scan') }}", pingUrl: "{{ url_for('kiosk_ping') }}",
   savePhotos: {{ save_photos|tojson }} };</script>
 <script src="{{ url_for('static', filename='js/kiosk.js') }}"></script>
 </body>

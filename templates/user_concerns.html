@@ -53,7 +53,7 @@
     {% if c.admin_reply %}<div class="reply"><strong>Admin:</strong> {{ c.admin_reply }}</div>{% endif %}
   </div>
 {% else %}
-  <p class="muted">No concerns yet.</p>
+  <div class="empty-state">No concerns yet.</div>
 {% endfor %}
 {% endblock %}
 {% block scripts %}

@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Set up · Face Attendance{% endblock %}
+{% block main_class %}login-wrap{% endblock %}
+{% block flashes %}{% endblock %}
+{% block content %}
+<div class="card login-card wide">
+  <img class="login-logo" src="{{ url_for('static', filename='img/logo.svg') }}" alt="" width="52" height="52">
+  <h1>Welcome to Face<span style="color:var(--primary)">Attend</span></h1>
+  <p class="sub">Let's set it up. First, create the admin account.</p>
+
+  <ol class="wizard">
+    <li class="current"><b>1</b> Admin account</li>
+    <li><b>2</b> Employees &amp; faces</li>
+    <li><b>3</b> Start the kiosk</li>
+  </ol>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for cat, msg in messages %}<div class="flash {{ cat }}">{{ msg }}</div>{% endfor %}
+  {% endwith %}
+
+  {% if blocked %}
+    <div class="flash error">For safety, the first admin account can only be created on the computer that runs
+      the app. Open <strong>http://localhost:5000</strong> on that computer.</div>
+    <p class="muted" style="font-size:13px; margin-bottom:0">Running in Docker or on a remote server? Set the
+      <code>ADMIN_PASSWORD</code> environment variable (the admin is then created at start-up), or set
+      <code>ALLOW_REMOTE_SETUP=1</code> and reload this page.</p>
+  {% else %}
+  <form method="post">
+    <div class="grid-2">
+      <div class="field"><label for="emp_code">Admin ID (used to log in)</label>
+        <input id="emp_code" name="emp_code" value="{{ form.emp_code }}" required maxlength="30" autocomplete="username"></div>
+      <div class="field"><label for="name">Your name</label>
+        <input id="name" name="name" value="{{ form.name }}" required maxlength="100" autofocus autocomplete="name"></div>
+    </div>
+    <div class="field"><label for="email">Email (optional)</label>
+      <input id="email" name="email" type="email" autocomplete="email"></div>
+    <div class="grid-2">
+      <div class="field"><label for="password">Password (min 8 characters)</label>
+        <input id="password" name="password" type="password" minlength="8" required autocomplete="new-password"></div>
+      <div class="field"><label for="confirm">Repeat password</label>
+        <input id="confirm" name="confirm" type="password" minlength="8" required autocomplete="new-password"></div>
+    </div>
+    <button class="btn" type="submit">Create admin account</button>
+  </form>
+  <p class="muted" style="font-size:13px; text-align:center; margin:14px 0 0">This page works only once. After this, people log in normally.</p>
+  {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+// Tell the user right away when the two passwords differ
+const pw = document.getElementById("password"), confirmPw = document.getElementById("confirm");
+if (pw) {
+  const check = () => confirmPw.setCustomValidity(confirmPw.value && confirmPw.value !== pw.value ? "Passwords do not match" : "");
+  pw.addEventListener("input", check); confirmPw.addEventListener("input", check);
+}
+</script>
+{% endblock %}

@@ -1,4 +1,6 @@
-"""Creates the first admin account.  Run:  python seed.py
+"""Creates the first admin account from the terminal.  Run:  python seed.py
+
+Optional: the app also offers a set-up page in the browser on first start.
 
 The password comes from the ADMIN_PASSWORD environment variable. If it is not set,
 a random password is created and printed once. Change it after the first login.

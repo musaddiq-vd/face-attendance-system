@@ -52,6 +52,6 @@
   {% endif %}
 </div>
 {% else %}
-  <p class="muted">No {{ '' if status == 'all' else status }} leave requests.</p>
+  <div class="empty-state">No {{ '' if status == 'all' else ('waiting' if status == 'pending' else status) }} leave requests.</div>
 {% endfor %}
 {% endblock %}

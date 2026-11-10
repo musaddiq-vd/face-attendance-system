@@ -16,3 +16,9 @@ instance/
 
 # Local tool settings
 .claude/
+
+# Data folder (when DATA_DIR is used) and SQLite side files
+data/
+attendance.db-wal
+attendance.db-shm
+*.log

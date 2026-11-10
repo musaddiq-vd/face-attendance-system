@@ -1,7 +1,30 @@
 import os
 import secrets
+from datetime import timedelta
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+
+
+def _load_env_file():
+    """Reads KEY=VALUE lines from a local .env file (listed in .gitignore), so settings do not
+    have to be typed in the terminal every time. Real environment variables win over the file."""
+    path = os.path.join(BASE_DIR, ".env")
+    if not os.path.exists(path):
+        return
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, value = line.split("=", 1)
+                value = value.split(" #", 1)[0]  # allow a comment after the value
+                os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
+
+
+_load_env_file()
+
+# Where private data is kept: database, photos and generated keys. Default: the project folder.
+DATA_DIR = os.path.abspath(os.environ.get("DATA_DIR") or BASE_DIR)
+os.makedirs(DATA_DIR, exist_ok=True)
 
 
 def _local_secret(env_name, file_name, nbytes):
@@ -9,7 +32,7 @@ def _local_secret(env_name, file_name, nbytes):
     in a local file (listed in .gitignore), so nothing secret is ever written in the code."""
     if os.environ.get(env_name):
         return os.environ[env_name]
-    path = os.path.join(BASE_DIR, file_name)
+    path = os.path.join(DATA_DIR, file_name)
     if not os.path.exists(path):
         with open(path, "w") as f:
             f.write(secrets.token_urlsafe(nbytes))
@@ -20,7 +43,7 @@ def _local_secret(env_name, file_name, nbytes):
 class Config:
     SECRET_KEY = _local_secret("SECRET_KEY", ".secret_key", 32)
     SQLALCHEMY_DATABASE_URI = os.environ.get(
-        "DATABASE_URL", "sqlite:///" + os.path.join(BASE_DIR, "attendance.db"))
+        "DATABASE_URL", "sqlite:///" + os.path.join(DATA_DIR, "attendance.db"))
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
     # Session cookie safety
@@ -28,15 +51,17 @@ class Config:
     SESSION_COOKIE_SAMESITE = "Lax"
     # Set SESSION_COOKIE_SECURE=1 when the app is served over HTTPS
     SESSION_COOKIE_SECURE = os.environ.get("SESSION_COOKIE_SECURE") == "1"
+    # People are logged out after this long without having to close the browser
+    PERMANENT_SESSION_LIFETIME = timedelta(hours=12)
 
     # Kiosk page is opened as /kiosk?key=<KIOSK_KEY>. The admin dashboard shows the full link.
     KIOSK_KEY = _local_secret("KIOSK_KEY", ".kiosk_key", 12)
 
     # Check-in / check-out photos are saved here
-    SNAPSHOT_DIR = os.environ.get("SNAPSHOT_DIR", os.path.join(BASE_DIR, "snapshots"))
+    SNAPSHOT_DIR = os.environ.get("SNAPSHOT_DIR", os.path.join(DATA_DIR, "snapshots"))
 
     # Optional employee profile photos
-    PROFILE_DIR = os.environ.get("PROFILE_DIR", os.path.join(BASE_DIR, "profile_photos"))
+    PROFILE_DIR = os.environ.get("PROFILE_DIR", os.path.join(DATA_DIR, "profile_photos"))
     MAX_CONTENT_LENGTH = 3 * 1024 * 1024  # largest upload allowed (3 MB)
 
     # Email notifications (optional). Leave SMTP_HOST empty to turn email off.

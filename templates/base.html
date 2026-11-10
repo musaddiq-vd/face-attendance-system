@@ -5,14 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="csrf-token" content="{{ csrf_token() }}">
   <title>{% block title %}Face Attendance{% endblock %}</title>
+  <link rel="icon" href="{{ url_for('static', filename='img/logo.svg') }}" type="image/svg+xml">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
   {% block head %}{% endblock %}
 </head>
 <body>
 {% if current_user.is_authenticated %}
 <header class="topbar">
-  <a class="brand" href="{{ url_for('index') }}">Face<span>Attend</span></a>
-  <nav class="nav">
+  <a class="brand" href="{{ url_for('index') }}">
+    <img src="{{ url_for('static', filename='img/logo.svg') }}" alt="" width="28" height="28">Face<span>Attend</span>
+  </a>
+  <nav class="nav" aria-label="Main">
     {% set ep = request.endpoint %}
     {% if current_user.is_admin %}
       <a href="{{ url_for('admin_dashboard') }}" class="{{ 'active' if ep == 'admin_dashboard' }}">Today</a>
@@ -29,9 +32,11 @@
     {% endif %}
   </nav>
   <div class="who">
-    <span>{{ current_user.name }} ({{ current_user.emp_code }})</span>
+    <span class="who-name" title="{{ current_user.emp_code }}">
+      <span class="avatar initials" style="width:28px;height:28px;font-size:11px">{{ current_user.initials }}</span>{{ current_user.name }}
+    </span>
     <a href="{{ url_for('change_password') }}">Password</a>
-    <a href="{{ url_for('logout') }}">Logout</a>
+    <form method="post" action="{{ url_for('logout') }}"><button class="link-btn">Logout</button></form>
   </div>
 </header>
 {% endif %}
@@ -39,19 +44,38 @@
 <main class="{% block main_class %}container{% endblock %}">
   {% block flashes %}
   {% with messages = get_flashed_messages(with_categories=true) %}
-    {% for cat, msg in messages %}<div class="flash {{ cat }}">{{ msg }}</div>{% endfor %}
+    {% for cat, msg in messages %}<div class="flash {{ cat }}" role="status">{{ msg }}</div>{% endfor %}
   {% endwith %}
   {% endblock %}
   {% block content %}{% endblock %}
 </main>
 <script>
-// Add the security token to every form on the page
 (() => {
+  // Add the security token to every form on the page
   const token = document.querySelector('meta[name="csrf-token"]').content;
   document.querySelectorAll('form[method="post"]').forEach(form => {
     const input = document.createElement("input");
     input.type = "hidden"; input.name = "csrf_token"; input.value = token;
     form.appendChild(input);
+    // Stop double clicks from sending the same form twice
+    form.addEventListener("submit", e => {
+      setTimeout(() => {
+        if (!e.defaultPrevented) form.querySelectorAll("button").forEach(b => (b.disabled = true));
+      }, 0);
+    });
+  });
+  // Coming back with the browser's Back button: make the buttons usable again
+  window.addEventListener("pageshow", e => {
+    if (e.persisted) document.querySelectorAll("form button:disabled").forEach(b => (b.disabled = false));
+  });
+  // Messages can be closed; success messages go away on their own
+  document.querySelectorAll(".flash[role=status]").forEach(el => {
+    const close = document.createElement("button");
+    close.type = "button"; close.className = "flash-close"; close.textContent = "×";
+    close.setAttribute("aria-label", "Close message");
+    close.addEventListener("click", () => el.remove());
+    el.appendChild(close);
+    if (el.classList.contains("success")) setTimeout(() => el.remove(), 8000);
   });
 })();
 </script>

@@ -3,6 +3,7 @@ import calendar
 import csv
 import io
 import json
+import logging
 import math
 import os
 import secrets
@@ -21,7 +22,8 @@ from flask import (Flask, Response, abort, flash, jsonify, redirect,
                    url_for)
 from flask_login import (LoginManager, current_user, login_required,
                          login_user, logout_user)
-from sqlalchemy import inspect, text
+from sqlalchemy import event, inspect, text
+from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 
 from config import DEFAULT_SETTINGS, Config
@@ -30,6 +32,23 @@ from models import (Attendance, Concern, FaceSample, Holiday, LeaveRequest,
 
 app = Flask(__name__)
 app.config.from_object(Config)
+if os.environ.get("BEHIND_PROXY") == "1":
+    # Behind an HTTPS reverse proxy (nginx, Caddy): trust its headers for the real address and scheme
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+
+
+@event.listens_for(Engine, "connect")
+def sqlite_pragmas(dbapi_conn, _record):
+    """SQLite: let the kiosk write while admin pages read, and wait instead of failing when busy."""
+    if type(dbapi_conn).__module__.startswith("sqlite3"):
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.execute("PRAGMA synchronous=NORMAL")
+        cur.execute("PRAGMA busy_timeout=5000")
+        cur.close()
+
+
 db.init_app(app)
 
 login_manager = LoginManager(app)
@@ -70,7 +89,7 @@ def csrf_token():
 
 @app.before_request
 def csrf_protect():
-    if request.method != "POST" or request.endpoint == "kiosk_scan":
+    if request.method != "POST" or request.endpoint in ("kiosk_scan", "kiosk_ping"):
         return None
     sent = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token") or ""
     token = session.get("csrf")
@@ -416,8 +435,70 @@ def save_snapshot(data_url, user, kind, when):
 
 # ---------------------------------------------------------------- auth
 
+_has_admin = False
+
+
+def needs_setup():
+    """True until the first admin account exists (a brand-new installation)."""
+    global _has_admin
+    if not _has_admin:
+        _has_admin = db.session.query(User.id).filter_by(role="admin").first() is not None
+    return not _has_admin
+
+
+def setup_allowed():
+    """The first admin can only be created from the server computer itself,
+    unless ALLOW_REMOTE_SETUP=1 is set (for example inside Docker)."""
+    return request.remote_addr in ("127.0.0.1", "::1") or os.environ.get("ALLOW_REMOTE_SETUP") == "1"
+
+
+@app.route("/setup", methods=["GET", "POST"])
+def setup():
+    """First-run page: creates the admin account, then is switched off for good."""
+    if not needs_setup():
+        return redirect(url_for("login"))
+    if not setup_allowed():
+        return render_template("setup.html", blocked=True, form={}), 403
+    form = {"emp_code": "admin", "name": ""}
+    if request.method == "POST":
+        form = {"emp_code": request.form.get("emp_code", "").strip(),
+                "name": request.form.get("name", "").strip()}
+        password = request.form.get("password", "")
+        if not form["emp_code"] or not form["name"] or len(form["emp_code"]) > 30 or len(form["name"]) > 100:
+            flash("Admin ID and name are required.", "error")
+        elif len(password) < 8:
+            flash("Password must be at least 8 characters.", "error")
+        elif password != request.form.get("confirm", ""):
+            flash("The two passwords do not match.", "error")
+        else:
+            admin = User(emp_code=form["emp_code"], name=form["name"], role="admin",
+                         email=request.form.get("email", "").strip())
+            admin.set_password(password)
+            db.session.add(admin)
+            db.session.commit()
+            app.logger.info("Setup finished: admin account '%s' created", admin.emp_code)
+            session.permanent = True
+            login_user(admin)
+            flash("Admin account created. Follow the steps below to finish setting up.", "success")
+            return redirect(url_for("admin_dashboard"))
+    return render_template("setup.html", blocked=False, form=form)
+
+
+@app.route("/healthz")
+def healthz():
+    """For uptime monitors and Docker health checks."""
+    try:
+        db.session.execute(text("SELECT 1"))
+        return jsonify(status="ok")
+    except Exception:  # any database problem means "not healthy"
+        app.logger.exception("Health check failed")
+        return jsonify(status="error"), 503
+
+
 @app.route("/")
 def index():
+    if needs_setup():
+        return redirect(url_for("setup"))
     if not current_user.is_authenticated:
         return redirect(url_for("login"))
     return redirect(url_for("admin_dashboard" if current_user.is_admin else "my_dashboard"))
@@ -425,6 +506,8 @@ def index():
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    if needs_setup():
+        return redirect(url_for("setup"))
     if current_user.is_authenticated:
         return redirect(url_for("index"))
     role = request.values.get("role", "employee")
@@ -441,6 +524,7 @@ def login():
         user = User.query.filter_by(emp_code=code).first()
         if not user or not user.check_password(request.form.get("password", "")):
             _failed_logins.setdefault(ip, []).append(time.time())
+            app.logger.warning("Failed login for '%s' from %s", code[:30], ip)
             left = Config.MAX_FAILED_LOGINS - len(_failed_logins[ip])
             flash("Wrong ID or password." + (f" {left} attempt(s) left." if 0 < left <= 2 else ""), "error")
         elif not user.active:
@@ -451,7 +535,9 @@ def login():
             flash("This is an admin account. Use Admin login.", "error")
         else:
             _failed_logins.pop(ip, None)
+            session.permanent = True  # expires after PERMANENT_SESSION_LIFETIME
             login_user(user)
+            app.logger.info("Login: %s (%s)", user.emp_code, user.role)
             return redirect(url_for("index"))
     return render_template("login.html", role=role, emp_code=code)
 
@@ -470,8 +556,9 @@ def login_blocked(ip):
     return len(recent) >= Config.MAX_FAILED_LOGINS
 
 
-@app.route("/logout")
+@app.route("/logout", methods=["POST"])
 def logout():
+    # POST + CSRF token, so another website cannot log people out with a hidden link
     logout_user()
     return redirect(url_for("login"))
 
@@ -589,12 +676,31 @@ def admin_dashboard():
     stats["absent"] = stats["total"] - stats["present"] - stats["on_leave"]
     holiday = Holiday.query.filter_by(date=today).first()
     cleanup_old_photos()
+    with_face = stats["total"] - stats["no_face"]
+    # Shown on the dashboard until every step is done
+    steps = [
+        {"title": "Add your employees", "done": stats["total"] > 0,
+         "hint": "Each employee gets an ID and a password for the employee portal.",
+         "url": url_for("admin_employees"), "action": "Add employees"},
+        {"title": "Register every employee's face", "done": stats["total"] > 0 and stats["no_face"] == 0,
+         "hint": f"{with_face} of {stats['total']} registered. Open an employee and use the camera.",
+         "url": url_for("admin_employees"), "action": "Register faces"},
+        {"title": "Set office hours, weekly off and holidays", "done": Setting.query.count() > 0,
+         "hint": "These rules decide who is late, on a half day or absent.",
+         "url": url_for("admin_settings"), "action": "Open settings"},
+        {"title": "Open the kiosk at the entrance", "done": bool(_kiosk_seen) or Attendance.query.count() > 0,
+         "hint": "Open the kiosk link below on the entrance computer and press F11 for full screen.",
+         "url": url_for("kiosk", key=Config.KIOSK_KEY), "action": "Open kiosk"},
+    ]
     warnings = []
     if uses_old_default_password(current_user):
         # Accounts created by older versions of seed.py used this password
         warnings.append("You are still using the old default admin password. Change it from 'Password' (top right).")
     return render_template("admin_dashboard.html", rows=rows, stats=stats, today=today,
                            holiday=holiday, rules=office_rules_text(), warnings=warnings,
+                           steps=steps if not all(s["done"] for s in steps) else [],
+                           kiosk_online=kiosk_online(),
+                           kiosk_seen=datetime.fromtimestamp(_kiosk_seen) if _kiosk_seen else None,
                            kiosk_url=url_for("kiosk", key=Config.KIOSK_KEY, _external=True))
 
 
@@ -868,6 +974,7 @@ def admin_attendance_edit():
                                    request.form.get("check_out"), request.form.get("status"))
     if ok:
         db.session.commit()
+        app.logger.info("Attendance of %s on %s edited by %s", u.emp_code, day, current_user.emp_code)
     flash(msg, "success" if ok else "error")
     return redirect(back_url("admin_attendance"))
 
@@ -1200,6 +1307,33 @@ def kiosk_key_ok(value):
     return isinstance(value, str) and secrets.compare_digest(value.encode(), Config.KIOSK_KEY.encode())
 
 
+_kiosk_seen = None  # time.time() of the last message from a kiosk page
+
+
+def kiosk_online():
+    return bool(_kiosk_seen) and time.time() - _kiosk_seen < 90
+
+
+def kiosk_today():
+    """Numbers shown at the bottom of the kiosk screen."""
+    today = date.today()
+    total = User.query.filter_by(role="employee", active=True).count()
+    checked_in = Attendance.query.join(User).filter(
+        Attendance.date == today, User.role == "employee", User.active.is_(True)).count()
+    return {"total": total, "checked_in": checked_in}
+
+
+@app.route("/api/kiosk/ping", methods=["POST"])
+def kiosk_ping():
+    """The kiosk page calls this every 30 seconds, so the admin can see that it is running."""
+    global _kiosk_seen
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or not kiosk_key_ok(data.get("key")):
+        abort(403)
+    _kiosk_seen = time.time()
+    return jsonify(ok=True, **kiosk_today())
+
+
 @app.route("/kiosk")
 def kiosk():
     if not kiosk_key_ok(request.args.get("key")):
@@ -1212,6 +1346,8 @@ def kiosk_scan():
     data = request.get_json(silent=True)
     if not isinstance(data, dict) or not kiosk_key_ok(data.get("key")):
         abort(403)
+    global _kiosk_seen
+    _kiosk_seen = time.time()
     descriptor = data.get("descriptor")
     if not valid_descriptor(descriptor):
         return jsonify(ok=False, error="bad descriptor"), 400
@@ -1254,6 +1390,7 @@ def kiosk_scan():
         # Two scans of the same person arrived together; the other one already saved the record
         db.session.rollback()
         return jsonify(**base, action="repeat", time=now.strftime("%I:%M %p"))
+    app.logger.info("Kiosk %s: %s at %s", action, user.emp_code, now.strftime("%H:%M:%S"))
     early = action == "check_out" and now.time() < hm(s["office_end"])
     return jsonify(**base, action=action, status=rec.status, early=early,
                    time=now.strftime("%I:%M %p"))
@@ -1293,13 +1430,63 @@ def upgrade_db():
             conn.execute(text(f"CREATE INDEX IF NOT EXISTS {name} ON {target}"))
 
 
+@app.cli.command("backup-db")
+def backup_db_cmd():
+    """flask --app app backup-db  ->  safe copy of the SQLite database, even while the app is running."""
+    import sqlite3
+    from config import DATA_DIR
+    uri = app.config["SQLALCHEMY_DATABASE_URI"]
+    if not uri.startswith("sqlite:///"):
+        print("This command only works with SQLite. Use your database server's own backup tool.")
+        return
+    folder = os.path.join(DATA_DIR, "backups")
+    os.makedirs(folder, exist_ok=True)
+    target = os.path.join(folder, f"attendance_{datetime.now():%Y-%m-%d_%H%M%S}.db")
+    src, dst = sqlite3.connect(uri[len("sqlite:///"):]), sqlite3.connect(target)
+    with dst:
+        src.backup(dst)
+    src.close()
+    dst.close()
+    print(f"Backup saved: {target}")
+
+
+def create_admin_from_env():
+    """Creates the first admin from ADMIN_ID / ADMIN_PASSWORD when they are set (handy for Docker).
+    Without them, the /setup page asks for the details in the browser."""
+    password = os.environ.get("ADMIN_PASSWORD")
+    if not password or User.query.filter_by(role="admin").first():
+        return
+    admin = User(emp_code=os.environ.get("ADMIN_ID", "admin"), name="Administrator", role="admin")
+    admin.set_password(password)
+    db.session.add(admin)
+    db.session.commit()
+    app.logger.info("Admin account '%s' created from ADMIN_PASSWORD", admin.emp_code)
+
+
 with app.app_context():
     upgrade_db()
+    create_admin_from_env()
+
+
+def main():
+    """Starts the web server.  python app.py"""
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    host = os.environ.get("HOST", "127.0.0.1")  # 0.0.0.0 = allow other computers on the network
+    port = int(os.environ.get("PORT", "5000"))
+    if os.environ.get("FLASK_DEBUG") == "1":
+        app.run(host=host, port=port, debug=True)  # auto-reload, only while developing
+        return
+    try:
+        from waitress import serve
+    except ImportError:
+        app.logger.warning("waitress is not installed; using Flask's development server. "
+                           "Run: pip install -r requirements.txt")
+        app.run(host=host, port=port)
+        return
+    app.logger.info("Face Attendance is running on http://%s:%s",
+                    "localhost" if host in ("127.0.0.1", "0.0.0.0") else host, port)
+    serve(app, host=host, port=port, threads=8)
 
 
 if __name__ == "__main__":
-    # Defaults are safe for one computer. Set HOST=0.0.0.0 to allow other computers on the network,
-    # and FLASK_DEBUG=1 only while developing.
-    app.run(host=os.environ.get("HOST", "127.0.0.1"),
-            port=int(os.environ.get("PORT", "5000")),
-            debug=os.environ.get("FLASK_DEBUG") == "1")
+    main()
