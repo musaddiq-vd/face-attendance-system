@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Reports · Admin{% endblock %}
+{% from "_avatar.html" import avatar %}
+{% block content %}
+<div class="row-between">
+  <div>
+    <h1>Monthly report — {{ month_label }}</h1>
+    <p class="sub" style="margin:0">One line per employee. Click a name to see the day-by-day record.</p>
+  </div>
+  <form class="inline" method="get">
+    <div class="field"><label>Month</label><input type="month" name="month" value="{{ month_value }}" onchange="this.form.submit()"></div>
+    <a class="btn secondary" href="{{ url_for('admin_reports_export', month=month_value) }}">Export summary CSV</a>
+    <a class="btn secondary" href="{{ url_for('admin_export', month=month_value) }}">Export daily CSV</a>
+  </form>
+</div>
+
+<div class="card table-wrap">
+  <table>
+    <thead><tr><th>Employee</th><th>Department</th><th>On time</th><th>Late</th><th>Absent</th><th>On leave</th>
+      <th>Half days</th><th>Early leaves</th><th>Total hours</th><th>Attendance</th></tr></thead>
+    <tbody>
+    {% for r in rows %}{% set s = r.s %}
+      <tr>
+        <td>{{ avatar(r.user) }}<a href="{{ url_for('admin_attendance', employee=r.user.id, month=month_value) }}">{{ r.user.name }}</a>
+          <span class="muted">{{ r.user.emp_code }}</span>
+          {% if not r.user.active %}<span class="pill inactive">Inactive</span>{% endif %}</td>
+        <td>{{ r.user.department or '—' }}</td>
+        <td>{{ s.present }}</td>
+        <td>{{ s.late }}</td>
+        <td>{% if s.absent %}<strong style="color:var(--red)">{{ s.absent }}</strong>{% else %}0{% endif %}</td>
+        <td>{{ s.leave }}</td>
+        <td>{{ s.half_day }}</td>
+        <td>{{ s.early }}</td>
+        <td>{{ s.hours }}</td>
+        <td>{% if s.percent is none %}—{% else %}
+          <span class="pill {{ 'present' if s.percent >= 90 else ('late' if s.percent >= 75 else 'absent') }}">{{ s.percent }}%</span>{% endif %}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="10" class="muted">No employees yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="muted" style="font-size:13px">Attendance % = days present (on time + late) out of working days so far.
+  Weekly offs, holidays and approved leave are not counted as working days.</p>
+{% endblock %}

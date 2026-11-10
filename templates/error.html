@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}{{ code }} · Face Attendance{% endblock %}
+{% block content %}
+<div class="card" style="max-width:480px; margin:60px auto; text-align:center">
+  <h1 style="font-size:44px; margin-bottom:8px">{{ code }}</h1>
+  <p class="sub">
+    {% if code == 403 %}You do not have permission to open this page.
+    {% else %}This page does not exist.{% endif %}
+  </p>
+  <a class="btn" href="{{ url_for('index') }}">Go to home page</a>
+</div>
+{% endblock %}

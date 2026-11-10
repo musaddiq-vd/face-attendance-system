@@ -26,7 +26,8 @@
     .result.out { background: rgba(47,91,234,.92); }
     .result.late { background: rgba(183,121,31,.95); }
     .result.repeat { background: rgba(80,88,104,.92); }
-    .result.unknown { background: rgba(214,69,69,.92); }    footer { padding: 14px 28px; color: #9aa4b8; display: flex; justify-content: space-between; font-size: 14px; }
+    .result.unknown { background: rgba(214,69,69,.92); }
+    footer { padding: 14px 28px; color: #9aa4b8; display: flex; justify-content: space-between; font-size: 14px; }
     #log { display: flex; gap: 18px; overflow: hidden; white-space: nowrap; }
   </style>
 </head>
@@ -41,7 +42,7 @@
     <canvas id="overlay"></canvas>
     <div class="result" id="result"><div class="big">Starting camera…</div><div class="small">Please wait</div></div>
   </div>
-  <footer><div id="log"></div><div id="fps"></div></footer>
+  <footer><div id="log"></div></footer>
 </div>
 <script src="{{ url_for('static', filename='vendor/face-api.js') }}"></script>
 <script src="{{ url_for('static', filename='js/face.js') }}"></script>

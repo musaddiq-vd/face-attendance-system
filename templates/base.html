@@ -6,6 +6,7 @@
   <meta name="csrf-token" content="{{ csrf_token() }}">
   <title>{% block title %}Face Attendance{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  {% block head %}{% endblock %}
 </head>
 <body>
 {% if current_user.is_authenticated %}
@@ -17,11 +18,13 @@
       <a href="{{ url_for('admin_dashboard') }}" class="{{ 'active' if ep == 'admin_dashboard' }}">Today</a>
       <a href="{{ url_for('admin_employees') }}" class="{{ 'active' if ep and ep.startswith('admin_employee') }}">Employees</a>
       <a href="{{ url_for('admin_attendance') }}" class="{{ 'active' if ep == 'admin_attendance' }}">Attendance</a>
+      <a href="{{ url_for('admin_reports') }}" class="{{ 'active' if ep == 'admin_reports' }}">Reports</a>
       <a href="{{ url_for('admin_concerns') }}" class="{{ 'active' if ep == 'admin_concerns' }}">Concerns{% if open_concerns %}<span class="badge-count">{{ open_concerns }}</span>{% endif %}</a>
       <a href="{{ url_for('admin_leaves') }}" class="{{ 'active' if ep == 'admin_leaves' }}">Leave{% if pending_leaves %}<span class="badge-count">{{ pending_leaves }}</span>{% endif %}</a>
       <a href="{{ url_for('admin_settings') }}" class="{{ 'active' if ep == 'admin_settings' }}">Settings</a>
     {% else %}
-      <a href="{{ url_for('my_dashboard') }}" class="{{ 'active' if ep == 'my_dashboard' }}">My Attendance</a>      <a href="{{ url_for('my_leaves') }}" class="{{ 'active' if ep == 'my_leaves' }}">Leave</a>
+      <a href="{{ url_for('my_dashboard') }}" class="{{ 'active' if ep == 'my_dashboard' }}">My Attendance</a>
+      <a href="{{ url_for('my_leaves') }}" class="{{ 'active' if ep == 'my_leaves' }}">Leave</a>
       <a href="{{ url_for('my_concerns') }}" class="{{ 'active' if ep == 'my_concerns' }}">Concerns</a>
     {% endif %}
   </nav>

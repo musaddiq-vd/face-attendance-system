@@ -5,6 +5,12 @@ const Face = (() => {
   const detectorOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 });
 
   async function loadModels() {
+    // Use the GPU (WebGL) when the browser has it, otherwise fall back to the CPU.
+    // Without this, computers with no WebGL fail with a "backend not initialized" error.
+    const tf = faceapi.tf;
+    const gpu = await tf.setBackend("webgl").catch(() => false);
+    if (!gpu) await tf.setBackend("cpu");
+    await tf.ready();
     await Promise.all([
       faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
       faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),

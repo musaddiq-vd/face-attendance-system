@@ -6,7 +6,7 @@
 <h1 style="display:flex;align-items:center">{{ avatar(u, 48) }}{{ u.name }}&nbsp;<span class="muted" style="font-weight:400">{{ u.emp_code }}</span></h1>
 <p class="sub">
   <span class="pill {{ 'yes' if u.active else 'inactive' }}">{{ 'Active' if u.active else 'Inactive' }}</span>
-  <span class="pill {{ 'yes' if u.has_face else 'no' }}">Face {{ 'registered (' ~ u.faces|length ~ ' samples)' if u.has_face else 'missing' }}</span>
+  <span class="pill {{ 'yes' if u.has_face else 'no' }}">Face {{ 'registered (' ~ u.face_count ~ ' samples)' if u.has_face else 'missing' }}</span>
   &nbsp;<a href="{{ url_for('admin_attendance', employee=u.id) }}">View attendance →</a>
 </p>
 

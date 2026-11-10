@@ -26,6 +26,8 @@ class Config:
     # Session cookie safety
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
+    # Set SESSION_COOKIE_SECURE=1 when the app is served over HTTPS
+    SESSION_COOKIE_SECURE = os.environ.get("SESSION_COOKIE_SECURE") == "1"
 
     # Kiosk page is opened as /kiosk?key=<KIOSK_KEY>. The admin dashboard shows the full link.
     KIOSK_KEY = _local_secret("KIOSK_KEY", ".kiosk_key", 12)

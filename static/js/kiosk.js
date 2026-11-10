@@ -52,7 +52,9 @@
 
   async function loop() {
     try {
-      if (Date.now() < pauseUntil) {
+      if (document.hidden) {
+        // Tab is not visible: skip the heavy face detection until it is shown again
+      } else if (Date.now() < pauseUntil) {
         Face.drawBox(overlay, video, null);
       } else {
         const r = await Face.detect(video);
@@ -78,6 +80,12 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ key, descriptor, photo }),
       });
+      if (res.status === 403) {
+        // The kiosk key was changed; this page can no longer mark attendance
+        show("unknown", "Kiosk link is no longer valid", "Ask the admin for the new kiosk link", 0);
+        pauseUntil = Infinity;
+        return;
+      }
       const d = await res.json();
       if (!d.ok) throw new Error(d.error || "Server error");
 

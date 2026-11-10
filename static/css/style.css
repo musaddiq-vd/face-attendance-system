@@ -137,7 +137,7 @@ textarea { min-height: 90px; resize: vertical; }
 
 /* Concerns */
 .concern { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 12px; }
-.concern .head { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.concern .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
 .concern .meta { color: var(--muted); font-size: 13px; margin-top: 2px; }
 .concern .msg { margin: 10px 0 0; white-space: pre-wrap; }
 .concern .reply { margin-top: 10px; background: #f1f5ff; border-left: 3px solid var(--primary); padding: 8px 12px; border-radius: 6px; white-space: pre-wrap; }

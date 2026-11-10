@@ -21,12 +21,33 @@ The first scan of the day is the **check-in** and later scans update the **check
 
 Face recognition runs **in the browser** with [face-api.js](https://github.com/vladmandic/face-api), so camera images are not sent to the server for matching. Faces are stored as descriptors (lists of numbers). Check-in / check-out photos are saved only if snapshots are turned on in Settings.
 
+## Screenshots
+
+All screenshots use made-up demo data.
+
+| Admin: today | Admin: monthly report |
+|---|---|
+| ![Admin dashboard](docs/screenshots/admin-dashboard.png) | ![Monthly report](docs/screenshots/reports.png) |
+
+| Admin: one employee's month | Employee portal |
+|---|---|
+| ![Month view](docs/screenshots/attendance-month.png) | ![Employee portal](docs/screenshots/employee-portal.png) |
+
+| Concerns | Leave requests |
+|---|---|
+| ![Concerns](docs/screenshots/concerns.png) | ![Leave requests](docs/screenshots/leaves.png) |
+
+| Settings | Login |
+|---|---|
+| ![Settings](docs/screenshots/settings.png) | ![Login](docs/screenshots/login.png) |
+
 ## Features
 
 | | |
 |---|---|
 | 📷 **Kiosk mode** | Full-screen entrance page that checks people in and out automatically |
-| 🧑‍💼 **Admin panel** | Manage employees, register faces, edit attendance, export CSV |
+| 🧑‍💼 **Admin panel** | Manage employees (with search), register faces, edit attendance, export CSV |
+| 📊 **Monthly report** | One line per employee: on time, late, absent, leave, hours and attendance %, with CSV export for payroll |
 | 🙋 **Employee portal** | Monthly attendance view, raise concerns, apply for leave |
 | 📝 **Concerns** | Employees report a wrong time; admin fixes it in one click |
 | 🌴 **Leave management** | Full-day or half-day leave requests with approve / reject; approved days show as *On leave* |
@@ -34,7 +55,7 @@ Face recognition runs **in the browser** with [face-api.js](https://github.com/v
 | 🧑 **Profile photos** | Optional employee photo shown next to their name in the admin panel |
 | ⚙️ **Office rules** | Office hours, late grace, half-day hours, weekly offs, holidays |
 | 🖼️ **Snapshots** | Optional photo at check-in / check-out with automatic cleanup |
-| 🔒 **Security** | CSRF protection, hashed passwords, login lockout after failed attempts |
+| 🔒 **Security** | CSRF protection, hashed passwords, login lockout after failed attempts, security headers, deactivated accounts are logged out at once |
 
 ### Attendance rules
 
@@ -112,6 +133,7 @@ python seed.py
 4. **Employees** log in to see their monthly record, raise concerns and apply for leave
    (tick **Half day** for a half-day leave).
 5. **Admin** reviews concerns and leave requests, edits attendance and exports CSV reports.
+   **Reports** shows the monthly totals for every employee on one page.
 6. **Profile photo (optional):** **Employees → Manage → Profile photo** → upload a JPG, PNG or WebP (max 3 MB).
 
 ## Configuration
@@ -129,6 +151,7 @@ Set these as environment variables (all optional):
 | `HOST` | `127.0.0.1` | Use `0.0.0.0` to allow other computers on the network |
 | `PORT` | `5000` | Server port |
 | `FLASK_DEBUG` | off | Set to `1` only during development |
+| `SESSION_COOKIE_SECURE` | off | Set to `1` when the app is served over HTTPS |
 
 Office rules (hours, grace time, holidays, photo settings, face match strictness) are changed from **Admin → Settings**.
 
@@ -176,6 +199,7 @@ face-attendance-system/
 │   └── vendor/          # face-api.js library
 ├── templates/           # Jinja2 HTML pages
 ├── tests/               # Unit tests
+├── docs/screenshots/    # Images used in this README
 ├── snapshots/           # Check-in / check-out photos (created at runtime, not in git)
 └── profile_photos/      # Employee profile photos (created at runtime, not in git)
 ```
@@ -187,6 +211,15 @@ python -m unittest discover tests -v
 ```
 
 Tests use a temporary database, so your real data is not touched.
+
+## Limitations
+
+- There is no liveness (anti-spoofing) check, so a good photo of a face may be accepted. Keep
+  **Save photo** turned on in Settings so the admin can review check-in photos.
+- One attendance record is kept per calendar day, so shifts that cross midnight are not supported.
+- `python app.py` starts Flask's built-in server, which is fine for one office on a local network.
+  For anything bigger, run the app with a production WSGI server.
+- Login lockout and caches live in memory, so run a single server process.
 
 ## Privacy
 

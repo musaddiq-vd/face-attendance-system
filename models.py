@@ -3,6 +3,8 @@ from datetime import datetime
 
 from flask_login import UserMixin
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import func, select
+from sqlalchemy.orm import column_property
 from werkzeug.security import check_password_hash, generate_password_hash
 
 db = SQLAlchemy()
@@ -44,12 +46,14 @@ class User(UserMixin, db.Model):
 
     @property
     def has_face(self):
-        return len(self.faces) > 0
+        # face_count is loaded together with the user (see the bottom of this file),
+        # so lists of employees do not run one extra query per person.
+        return (self.face_count or 0) > 0
 
 
 class FaceSample(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
     descriptor = db.Column(db.Text, nullable=False)  # JSON list of 128 floats
     created_at = db.Column(db.DateTime, default=datetime.now)
 
@@ -60,7 +64,7 @@ class FaceSample(db.Model):
 class Attendance(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
-    date = db.Column(db.Date, nullable=False)
+    date = db.Column(db.Date, nullable=False, index=True)
     check_in = db.Column(db.DateTime)
     check_out = db.Column(db.DateTime)
     status = db.Column(db.String(20), default="present")  # present / late
@@ -96,7 +100,7 @@ class Holiday(db.Model):
 
 class LeaveRequest(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
     start_date = db.Column(db.Date, nullable=False)
     end_date = db.Column(db.Date, nullable=False)
     leave_type = db.Column(db.String(20), nullable=False)  # casual / sick / other
@@ -118,7 +122,7 @@ class LeaveRequest(db.Model):
 
 class Concern(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
     date = db.Column(db.Date)  # the attendance day this concern is about
     requested_in = db.Column(db.String(5))   # "HH:MM" the employee says is correct
     requested_out = db.Column(db.String(5))
@@ -128,3 +132,13 @@ class Concern(db.Model):
     admin_reply = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+# Number of saved face samples, fetched in the same SELECT as the user.
+User.face_count = column_property(
+    select(func.count(FaceSample.id))
+    .where(FaceSample.user_id == User.id)
+    .correlate_except(FaceSample)
+    .scalar_subquery(),
+    deferred=False,
+)

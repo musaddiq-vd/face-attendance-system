@@ -21,8 +21,11 @@
   </form>
 </div>
 
+<div class="field" style="max-width:320px">
+  <input type="search" id="empSearch" placeholder="Search by ID, name or department…" aria-label="Search employees">
+</div>
 <div class="card table-wrap">
-  <table>
+  <table id="empTable">
     <thead><tr><th>ID</th><th>Name</th><th>Department</th><th>Role</th><th>Face</th><th>Status</th><th></th></tr></thead>
     <tbody>
     {% for u in users %}
@@ -39,4 +42,15 @@
     </tbody>
   </table>
 </div>
+{% endblock %}
+{% block scripts %}
+<script>
+// Filter the table while typing
+document.getElementById("empSearch").addEventListener("input", e => {
+  const q = e.target.value.trim().toLowerCase();
+  document.querySelectorAll("#empTable tbody tr").forEach(tr => {
+    tr.hidden = q !== "" && !tr.textContent.toLowerCase().includes(q);
+  });
+});
+</script>
 {% endblock %}

@@ -298,7 +298,7 @@ class AppTestCase(unittest.TestCase):
         admin, emp = self.admin(), self.employee()
         for url in ["/admin", "/admin/employees", f"/admin/employees/{self.emp_id}", "/admin/attendance",
                     f"/admin/attendance?employee={self.emp_id}", "/admin/concerns?status=all", "/admin/settings",
-                    "/admin/leaves", "/admin/leaves?status=all"]:
+                    "/admin/leaves", "/admin/leaves?status=all", "/admin/reports"]:
             self.assertEqual(admin.get(url).status_code, 200, url)
         for url in ["/me", "/me/concerns", "/me/leaves", "/change-password"]:
             self.assertEqual(emp.get(url).status_code, 200, url)
@@ -554,6 +554,92 @@ class AppTestCase(unittest.TestCase):
         self.assertIn("hr@example.com", self.admin().get("/admin/settings").get_data(as_text=True))
         self.post(self.admin(), "/admin/settings/test-email", {"to": "me@example.com"})
         self.assertEqual(self.sent[-1][0], "me@example.com")
+
+    # ---------------- robustness + monthly report
+
+    def test_deactivated_employee_is_logged_out(self):
+        emp = self.employee()
+        self.assertEqual(emp.get("/me").status_code, 200)
+        self.post(self.admin(), f"/admin/employees/{self.emp_id}", {"action": "toggle"})
+        self.assertEqual(emp.get("/me").status_code, 302)  # sent back to the login page
+
+    def test_bad_month_and_date_do_not_crash(self):
+        admin = self.admin()
+        for url in ["/admin/reports?month=2026-13", "/admin/attendance/export?month=abc",
+                    f"/admin/attendance?employee={self.emp_id}&month=0-0", "/admin/attendance?date=2026-02-31"]:
+            self.assertEqual(admin.get(url).status_code, 200, url)
+        self.assertEqual(self.employee().get("/me?month=99999-99").status_code, 200)
+        r = self.post(admin, "/admin/attendance/edit", {"user_id": self.emp_id, "date": "not-a-date",
+                                                        "check_in": "09:00"})
+        self.assertEqual(r.status_code, 302)
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        self.post(admin, "/admin/attendance/edit", {"user_id": self.emp_id, "date": tomorrow, "check_in": "09:00"})
+        with A.app.app_context():
+            self.assertEqual(Attendance.query.count(), 0)
+
+    def test_role_must_be_admin_or_employee(self):
+        admin = self.admin()
+        self.post(admin, "/admin/employees", {"emp_code": "E9", "name": "Zed", "password": "secret9", "role": "boss"})
+        self.post(admin, f"/admin/employees/{self.emp_id}", {"name": "Ravi", "role": "boss"})
+        self.post(admin, f"/admin/employees/{self.emp_id}", {"name": "  ", "role": "employee"})
+        with A.app.app_context():
+            self.assertIsNone(User.query.filter_by(emp_code="E9").first())
+            emp = db.session.get(User, self.emp_id)
+            self.assertEqual((emp.role, emp.name), ("employee", "Ravi"))
+
+    def test_redirect_back_stays_on_this_site(self):
+        r = A.app.test_client().post("/login", data={"emp_code": "x"}, headers={"Referer": "https://evil.example/x"})
+        self.assertNotIn("evil.example", r.headers["Location"])
+
+    def test_security_headers_and_error_pages(self):
+        r = self.admin().get("/no-such-page")
+        self.assertEqual(r.status_code, 404)
+        self.assertIn("This page does not exist", r.get_data(as_text=True))
+        self.assertEqual(r.headers["X-Content-Type-Options"], "nosniff")
+        self.assertEqual(r.headers["Referrer-Policy"], "same-origin")
+
+    def test_kiosk_rejects_broken_requests(self):
+        c = A.app.test_client()
+        self.assertEqual(c.post("/api/kiosk/scan", json=["not", "an", "object"]).status_code, 403)
+        self.assertEqual(c.post("/api/kiosk/scan", json={"key": 123, "descriptor": face(1)}).status_code, 403)
+        bad = face(1)
+        bad[0] = float("nan")
+        r = c.post("/api/kiosk/scan", data='{"key": "%s", "descriptor": %s}' % (KEY, str(bad).replace("nan", "NaN")),
+                   content_type="application/json")
+        self.assertEqual(r.status_code, 400)
+
+    def test_monthly_report_and_summary_csv(self):
+        admin = self.admin()
+        with A.app.app_context():
+            other = User(emp_code="=E2", name="Meena", created_at=datetime(2026, 1, 1))
+            other.set_password("secret2")
+            db.session.add(other)
+            db.session.commit()
+        for day, check_in in [("2026-10-28", "09:00"), ("2026-10-29", "10:30")]:
+            self.post(admin, "/admin/attendance/edit", {"user_id": self.emp_id, "date": day,
+                                                        "check_in": check_in, "check_out": "17:00"})
+        page = admin.get("/admin/reports?month=2026-10").get_data(as_text=True)
+        self.assertIn("Ravi", page)
+        self.assertIn("Meena", page)
+        with A.app.app_context():
+            ravi = db.session.get(User, self.emp_id)
+            _, s = A.month_report(ravi, 2026, 10)
+            both = A.month_reports(User.query.filter_by(role="employee").all(), 2026, 10)
+            self.assertEqual(both[self.emp_id][1], s)  # batch and single reports agree
+        self.assertEqual((s["present"], s["late"], s["hours"]), (1, 1, 14.5))
+        self.assertEqual(s["percent"], round(2 * 100 / (2 + s["absent"])))
+        rows = admin.get("/admin/reports/export?month=2026-10").get_data(as_text=True).splitlines()
+        self.assertTrue(rows[0].startswith("Employee ID,Name"))
+        self.assertTrue(any(line.startswith("E1,Ravi,IT,1,1,") for line in rows))
+        self.assertTrue(any(line.startswith("'=E2,Meena") for line in rows))  # no spreadsheet formulas
+
+    def test_face_count_follows_registration(self):
+        self.register_face(self.emp_id, face(1))
+        with A.app.app_context():
+            self.assertEqual(db.session.get(User, self.emp_id).face_count, 5)
+        self.post(self.admin(), f"/admin/employees/{self.emp_id}", {"action": "clear_face"})
+        with A.app.app_context():
+            self.assertFalse(db.session.get(User, self.emp_id).has_face)
 
 
 if __name__ == "__main__":

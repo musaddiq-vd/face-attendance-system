@@ -14,6 +14,7 @@ import time
 from email.message import EmailMessage
 from datetime import date, datetime, timedelta
 from functools import wraps
+from urllib.parse import urlsplit
 
 from flask import (Flask, Response, abort, flash, jsonify, redirect,
                    render_template, request, send_from_directory, session,
@@ -21,6 +22,7 @@ from flask import (Flask, Response, abort, flash, jsonify, redirect,
 from flask_login import (LoginManager, current_user, login_required,
                          login_user, logout_user)
 from sqlalchemy import inspect, text
+from sqlalchemy.exc import IntegrityError
 
 from config import DEFAULT_SETTINGS, Config
 from models import (Attendance, Concern, FaceSample, Holiday, LeaveRequest,
@@ -34,12 +36,15 @@ login_manager = LoginManager(app)
 login_manager.login_view = "login"
 login_manager.login_message = "Please log in first."
 
+ROLES = ("admin", "employee")
 WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
 
 @login_manager.user_loader
 def load_user(user_id):
-    return db.session.get(User, int(user_id))
+    # A deactivated account is logged out right away, even if it still has a session cookie
+    user = db.session.get(User, int(user_id))
+    return user if user and user.active else None
 
 
 def admin_required(view):
@@ -75,7 +80,38 @@ def csrf_protect():
     if request.is_json:
         return jsonify(ok=False, error=message), 400
     flash(message, "error")
-    return redirect(request.referrer or url_for("index"))
+    return redirect(back_url("index"))
+
+
+def back_url(default, **values):
+    """The page the user came from, but only if it belongs to this site."""
+    ref = request.referrer
+    if ref and urlsplit(ref).netloc == request.host:
+        return ref
+    return url_for(default, **values)
+
+
+@app.after_request
+def security_headers(resp):
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    # The kiosk link has a secret key in it; never send it to other sites
+    resp.headers.setdefault("Referrer-Policy", "same-origin")
+    return resp
+
+
+@app.errorhandler(403)
+@app.errorhandler(404)
+def error_page(e):
+    if request.path.startswith("/api/"):
+        return jsonify(ok=False, error=e.name), e.code
+    return render_template("error.html", code=e.code, name=e.name), e.code
+
+
+@app.errorhandler(413)
+def upload_too_large(e):
+    flash(f"That file is too large. The limit is {Config.MAX_CONTENT_LENGTH // (1024 * 1024)} MB.", "error")
+    return redirect(back_url("index"))
 
 
 @app.context_processor
@@ -161,11 +197,21 @@ def checkin_status(check_in):
 def parse_month(value):
     """'2026-11' -> (2026, 11). Falls back to current month."""
     try:
-        y, m = value.split("-")
-        return int(y), int(m)
+        y, m = (int(part) for part in value.split("-"))
+        if 2000 <= y <= 2100 and 1 <= m <= 12:
+            return y, m
     except (AttributeError, ValueError):
-        today = date.today()
-        return today.year, today.month
+        pass
+    today = date.today()
+    return today.year, today.month
+
+
+def parse_date(value):
+    """'2026-11-05' -> date, or None when it is missing or not a real date."""
+    try:
+        return datetime.strptime(value or "", "%Y-%m-%d").date()
+    except ValueError:
+        return None
 
 
 def holidays_between(start, end):
@@ -222,26 +268,37 @@ def day_info(user, day, rec, holidays, leaves=None):
         return "off", [], None
     if leave:
         return "leave", [], leave[0] + (" (half day)" if leave[1] else "")
-    if day > now.date() or day < user.created_at.date():
+    if day > now.date() or (user.created_at and day < user.created_at.date()):
         return "", [], None  # future, or before the employee joined
     return "absent", [], None
 
 
 def month_report(user, year, month):
     """Day-by-day rows for one employee + summary counts."""
+    return month_reports([user], year, month)[user.id]
+
+
+def month_reports(users, year, month):
+    """{user.id: (rows, summary)} for many employees. Uses three queries in total,
+    not three per employee, so reports and exports stay fast."""
     days_in_month = calendar.monthrange(year, month)[1]
     start, end = date(year, month, 1), date(year, month, days_in_month)
-    records = {a.date: a for a in Attendance.query.filter(
-        Attendance.user_id == user.id, Attendance.date.between(start, end))}
+    q = Attendance.query.filter(Attendance.date.between(start, end))
+    if len(users) == 1:
+        q = q.filter(Attendance.user_id == users[0].id)
+    records = {(a.user_id, a.date): a for a in q}
     holidays = holidays_between(start, end)
-    leaves = approved_leaves(start, end, user.id)
+    leaves = approved_leaves(start, end, users[0].id if len(users) == 1 else None)
+    return {u.id: _month_rows(u, year, month, days_in_month, records, holidays, leaves) for u in users}
 
+
+def _month_rows(user, year, month, days_in_month, records, holidays, leaves):
     rows = []
     summary = {"present": 0, "late": 0, "absent": 0, "off": 0, "holiday": 0, "leave": 0,
                "half_day": 0, "early": 0, "corrected": 0, "hours": 0.0}
     for d in range(1, days_in_month + 1):
         day = date(year, month, d)
-        rec = records.get(day)
+        rec = records.get((user.id, day))
         status, flags, holiday = day_info(user, day, rec, holidays, leaves)
         if status:
             half_leave = status == "leave" and holiday.endswith("(half day)")
@@ -255,6 +312,10 @@ def month_report(user, year, month):
                 summary["corrected"] += 1
         rows.append({"date": day, "record": rec, "status": status, "flags": flags, "holiday": holiday})
     summary["hours"] = round(summary["hours"], 1)
+    # Share of working days (so far) on which the employee came in
+    came = summary["present"] + summary["late"]
+    expected = came + summary["absent"]
+    summary["percent"] = round(came * 100 / expected) if expected else None
     return rows, summary
 
 
@@ -285,7 +346,8 @@ def best_match(descriptor):
 
 
 def valid_descriptor(d):
-    return isinstance(d, list) and len(d) == 128 and all(isinstance(x, (int, float)) for x in d)
+    return (isinstance(d, list) and len(d) == 128
+            and all(isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) for x in d))
 
 
 def save_faces(user, descriptors):
@@ -401,7 +463,10 @@ _failed_logins = {}
 def login_blocked(ip):
     now = time.time()
     recent = [t for t in _failed_logins.get(ip, []) if now - t < Config.LOGIN_BLOCK_SECONDS]
-    _failed_logins[ip] = recent
+    if recent:
+        _failed_logins[ip] = recent
+    else:
+        _failed_logins.pop(ip, None)  # do not keep empty entries forever
     return len(recent) >= Config.MAX_FAILED_LOGINS
 
 
@@ -452,8 +517,8 @@ def my_dashboard():
 def my_concerns():
     if request.method == "POST":
         f = request.form
-        subject = f.get("subject", "").strip()
-        message = f.get("message", "").strip()
+        subject = f.get("subject", "").strip()[:150]
+        message = f.get("message", "").strip()[:2000]
         try:
             day = datetime.strptime(f["date"], "%Y-%m-%d").date() if f.get("date") else None
             req_in = hm(f["requested_in"]).strftime("%H:%M") if f.get("requested_in") else None
@@ -490,8 +555,14 @@ def my_concerns():
 
 def concern_records(concerns):
     """{concern.id: Attendance or None} — the record for the day each concern is about."""
-    return {c.id: Attendance.query.filter_by(user_id=c.user_id, date=c.date).first() if c.date else None
-            for c in concerns}
+    dated = [c for c in concerns if c.date]
+    found = {}
+    if dated:
+        # One query for the whole page instead of one per concern
+        found = {(a.user_id, a.date): a for a in Attendance.query.filter(
+            Attendance.user_id.in_({c.user_id for c in dated}),
+            Attendance.date.in_({c.date for c in dated}))}
+    return {c.id: found.get((c.user_id, c.date)) for c in concerns}
 
 
 # ---------------------------------------------------------------- admin
@@ -519,12 +590,24 @@ def admin_dashboard():
     holiday = Holiday.query.filter_by(date=today).first()
     cleanup_old_photos()
     warnings = []
-    if current_user.check_password("admin123"):
+    if uses_old_default_password(current_user):
         # Accounts created by older versions of seed.py used this password
         warnings.append("You are still using the old default admin password. Change it from 'Password' (top right).")
     return render_template("admin_dashboard.html", rows=rows, stats=stats, today=today,
                            holiday=holiday, rules=office_rules_text(), warnings=warnings,
                            kiosk_url=url_for("kiosk", key=Config.KIOSK_KEY, _external=True))
+
+
+_old_password_checks = {}
+
+
+def uses_old_default_password(user):
+    """Password hashing is slow on purpose, so the answer is remembered per password hash."""
+    key = user.password_hash
+    if key not in _old_password_checks:
+        _old_password_checks.clear()
+        _old_password_checks[key] = user.check_password("admin123")
+    return _old_password_checks[key]
 
 
 @app.route("/admin/settings", methods=["GET", "POST"])
@@ -533,10 +616,9 @@ def admin_settings():
     if request.method == "POST":
         action = request.form.get("action")
         if action == "add_holiday":
-            try:
-                day = datetime.strptime(request.form["date"], "%Y-%m-%d").date()
-                name = request.form.get("name", "").strip() or "Holiday"
-            except (KeyError, ValueError):
+            day = parse_date(request.form.get("date"))
+            name = request.form.get("name", "").strip()[:100] or "Holiday"
+            if not day:
                 flash("Pick a valid date.", "error")
                 return redirect(url_for("admin_settings"))
             if Holiday.query.filter_by(date=day).first():
@@ -589,15 +671,18 @@ def admin_employees():
         code = request.form.get("emp_code", "").strip()
         name = request.form.get("name", "").strip()
         password = request.form.get("password", "")
+        role = request.form.get("role", "employee")
         if not code or not name or len(password) < 6:
             flash("Employee ID, name and a 6+ character password are required.", "error")
+        elif len(code) > 30 or len(name) > 100 or role not in ROLES:
+            flash("Employee ID can be at most 30 characters and name at most 100.", "error")
         elif User.query.filter_by(emp_code=code).first():
             flash(f"Employee ID {code} already exists.", "error")
         else:
             u = User(emp_code=code, name=name,
                      email=request.form.get("email", "").strip(),
                      department=request.form.get("department", "").strip(),
-                     role=request.form.get("role", "employee"))
+                     role=role)
             u.set_password(password)
             db.session.add(u)
             db.session.commit()
@@ -630,11 +715,16 @@ def admin_employee_edit(uid):
             delete_profile_photo(u)
             flash("Profile photo removed.", "success")
         else:
-            u.name = request.form.get("name", u.name).strip()
+            name = request.form.get("name", "").strip()
+            role = request.form.get("role", u.role)
+            if not name or len(name) > 100 or role not in ROLES:
+                flash("Name is required (at most 100 characters).", "error")
+                return redirect(url_for("admin_employee_edit", uid=uid))
+            u.name = name
             u.email = request.form.get("email", "").strip()
             u.department = request.form.get("department", "").strip()
             if u.id != current_user.id:
-                u.role = request.form.get("role", u.role)
+                u.role = role
             if request.form.get("password"):
                 if len(request.form["password"]) < 6:
                     flash("Password must be at least 6 characters.", "error")
@@ -718,10 +808,7 @@ def admin_attendance():
                                month_value=f"{year:04d}-{month:02d}",
                                late_at=late_cutoff().strftime("%H:%M"))
     # Daily view for everyone
-    try:
-        day = datetime.strptime(request.args.get("date", ""), "%Y-%m-%d").date()
-    except ValueError:
-        day = date.today()
+    day = parse_date(request.args.get("date")) or date.today()
     records = {a.user_id: a for a in Attendance.query.filter_by(date=day)}
     holidays = holidays_between(day, day)
     leaves = approved_leaves(day, day)
@@ -773,13 +860,16 @@ def apply_attendance(u, day, check_in_str, check_out_str, status=None, note=None
 @admin_required
 def admin_attendance_edit():
     u = db.get_or_404(User, request.form.get("user_id", type=int))
-    day = datetime.strptime(request.form["date"], "%Y-%m-%d").date()
-    ok, msg = apply_attendance(u, day, request.form.get("check_in"),
-                               request.form.get("check_out"), request.form.get("status"))
+    day = parse_date(request.form.get("date"))
+    if not day or day > date.today():
+        ok, msg = False, "Pick a valid date that is not in the future."
+    else:
+        ok, msg = apply_attendance(u, day, request.form.get("check_in"),
+                                   request.form.get("check_out"), request.form.get("status"))
     if ok:
         db.session.commit()
     flash(msg, "success" if ok else "error")
-    return redirect(request.referrer or url_for("admin_attendance"))
+    return redirect(back_url("admin_attendance"))
 
 
 @app.route("/admin/attendance/export")
@@ -793,22 +883,77 @@ def admin_export():
     w = csv.writer(out)
     w.writerow(["Employee ID", "Name", "Department", "Date", "Day", "Status", "Remarks",
                 "Check-in", "Check-out", "Hours"])
+    reports = month_reports(users, year, month) if users else {}
     for u in users:
-        rows, _ = month_report(u, year, month)
-        for r in rows:
+        for r in reports[u.id][0]:
             rec = r["record"]
             notes = [FLAG_LABELS[f] for f in r["flags"]]
             if rec and rec.edited_at:
                 notes.append("Corrected by admin")
             remarks = ", ".join(notes) or (r["holiday"] or "")
-            w.writerow([u.emp_code, u.name, u.department or "", r["date"].isoformat(),
+            w.writerow([csv_safe(u.emp_code), csv_safe(u.name), csv_safe(u.department or ""),
+                        r["date"].isoformat(),
                         r["date"].strftime("%a"), status_label(r["status"]), remarks,
                         rec.check_in.strftime("%H:%M") if rec and rec.check_in else "",
                         rec.check_out.strftime("%H:%M") if rec and rec.check_out else "",
                         rec.hours if rec and rec.hours is not None else ""])
-    name = f"attendance_{year}-{month:02d}" + (f"_{users[0].emp_code}" if emp_id else "") + ".csv"
+    name = f"attendance_{year}-{month:02d}" + (f"_{file_safe(users[0].emp_code)}" if emp_id else "") + ".csv"
+    return csv_response(out, name)
+
+
+def csv_safe(value):
+    """Spreadsheet apps run cells that start with = + - @ as formulas. A leading ' stops that."""
+    value = str(value)
+    return "'" + value if value[:1] in ("=", "+", "-", "@") else value
+
+
+def file_safe(value):
+    return "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in value)
+
+
+def csv_response(out, name):
     return Response(out.getvalue(), mimetype="text/csv",
-                    headers={"Content-Disposition": f"attachment; filename={name}"})
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+def report_users(year, month):
+    """Employees for the monthly summary: active ones, plus inactive ones who have records that month."""
+    days = calendar.monthrange(year, month)[1]
+    seen = {uid for (uid,) in db.session.query(Attendance.user_id).filter(
+        Attendance.date.between(date(year, month, 1), date(year, month, days))).distinct()}
+    return [u for u in User.query.filter_by(role="employee").order_by(User.name)
+            if u.active or u.id in seen]
+
+
+@app.route("/admin/reports")
+@admin_required
+def admin_reports():
+    """One line per employee for a month: the numbers needed for payroll."""
+    year, month = parse_month(request.args.get("month"))
+    users = report_users(year, month)
+    reports = month_reports(users, year, month) if users else {}
+    rows = [{"user": u, "s": reports[u.id][1]} for u in users]
+    return render_template("admin_reports.html", rows=rows,
+                           month_value=f"{year:04d}-{month:02d}",
+                           month_label=date(year, month, 1).strftime("%B %Y"))
+
+
+@app.route("/admin/reports/export")
+@admin_required
+def admin_reports_export():
+    year, month = parse_month(request.args.get("month"))
+    users = report_users(year, month)
+    reports = month_reports(users, year, month) if users else {}
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["Employee ID", "Name", "Department", "On time", "Late", "Absent", "On leave",
+                "Half days", "Early leaves", "Total hours", "Attendance %"])
+    for u in users:
+        s = reports[u.id][1]
+        w.writerow([csv_safe(u.emp_code), csv_safe(u.name), csv_safe(u.department or ""),
+                    s["present"], s["late"], s["absent"], s["leave"], s["half_day"], s["early"],
+                    s["hours"], "" if s["percent"] is None else s["percent"]])
+    return csv_response(out, f"summary_{year}-{month:02d}.csv")
 
 
 @app.route("/admin/snapshots/<path:rel>")
@@ -870,7 +1015,7 @@ def admin_concern_reply(cid):
                f"Your concern \"{c.subject}\" {state}."
                + (f"\n\nAdmin's reply: {c.admin_reply}" if c.admin_reply else ""))
     flash("Concern updated.", "success")
-    return redirect(request.referrer or url_for("admin_concerns"))
+    return redirect(back_url("admin_concerns"))
 
 
 # ---------------------------------------------------------------- email notifications
@@ -954,14 +1099,13 @@ def my_leaves():
             flash("Leave request cancelled.", "success")
             return redirect(url_for("my_leaves"))
 
-        try:
-            start = datetime.strptime(f["start_date"], "%Y-%m-%d").date()
-            end = datetime.strptime(f.get("end_date") or f["start_date"], "%Y-%m-%d").date()
-        except (KeyError, ValueError):
+        start = parse_date(f.get("start_date"))
+        end = parse_date(f.get("end_date") or f.get("start_date"))
+        if not start or not end:
             flash("Please choose valid dates.", "error")
             return redirect(url_for("my_leaves"))
         leave_type = f.get("leave_type")
-        reason = f.get("reason", "").strip()
+        reason = f.get("reason", "").strip()[:1000]
         half_day = f.get("half_day") == "1"
         today = date.today()
         overlap = LeaveRequest.query.filter(
@@ -991,9 +1135,11 @@ def my_leaves():
         return redirect(url_for("my_leaves"))
 
     leaves = LeaveRequest.query.filter_by(user_id=current_user.id).order_by(LeaveRequest.created_at.desc()).all()
-    year_start = date(date.today().year, 1, 1)
-    taken = sum(0.5 if lv.half_day else working_days(max(lv.start_date, year_start), lv.end_date)
-                for lv in leaves if lv.status == "approved" and lv.end_date >= year_start)
+    # Only the part of each leave that falls inside this calendar year is counted
+    year_start, year_end = date(date.today().year, 1, 1), date(date.today().year, 12, 31)
+    taken = sum(0.5 if lv.half_day else working_days(max(lv.start_date, year_start), min(lv.end_date, year_end))
+                for lv in leaves
+                if lv.status == "approved" and lv.end_date >= year_start and lv.start_date <= year_end)
     return render_template("user_leaves.html", leaves=leaves, taken=taken,
                            working_days=working_days, today=date.today(),
                            min_date=date.today() - timedelta(days=LEAVE_BACKDATE_DAYS))
@@ -1008,11 +1154,17 @@ def admin_leaves():
         q = q.filter_by(status=status)
     leaves = q.order_by(LeaveRequest.start_date.desc()).all()
     # Days of attendance already recorded inside each request (useful before approving)
-    worked = {}
-    for lv in leaves:
-        worked[lv.id] = Attendance.query.filter(
-            Attendance.user_id == lv.user_id,
-            Attendance.date.between(lv.start_date, lv.end_date)).count()
+    worked = {lv.id: 0 for lv in leaves}
+    if leaves:
+        # One query for the whole page instead of one per request
+        scanned = {}
+        for uid, day in db.session.query(Attendance.user_id, Attendance.date).filter(
+                Attendance.user_id.in_({lv.user_id for lv in leaves}),
+                Attendance.date.between(min(lv.start_date for lv in leaves),
+                                        max(lv.end_date for lv in leaves))):
+            scanned.setdefault(uid, []).append(day)
+        for lv in leaves:
+            worked[lv.id] = sum(1 for d in scanned.get(lv.user_id, ()) if lv.start_date <= d <= lv.end_date)
     return render_template("admin_leaves.html", leaves=leaves, status=status,
                            worked=worked, working_days=working_days)
 
@@ -1028,7 +1180,7 @@ def admin_leave_decide(lid):
         flash("The employee cancelled this request.", "error")
         return redirect(url_for("admin_leaves"))
     lv.status = "approved" if action == "approve" else "rejected"
-    lv.admin_reply = request.form.get("reply", "").strip() or None
+    lv.admin_reply = request.form.get("reply", "").strip()[:500] or None
     lv.decided_by = current_user.name
     lv.decided_at = datetime.now().replace(microsecond=0)
     db.session.commit()
@@ -1043,17 +1195,22 @@ def admin_leave_decide(lid):
 
 # ---------------------------------------------------------------- kiosk
 
+def kiosk_key_ok(value):
+    """Compares in constant time, so the key cannot be guessed from response timing."""
+    return isinstance(value, str) and secrets.compare_digest(value.encode(), Config.KIOSK_KEY.encode())
+
+
 @app.route("/kiosk")
 def kiosk():
-    if request.args.get("key") != Config.KIOSK_KEY:
+    if not kiosk_key_ok(request.args.get("key")):
         abort(403)
     return render_template("kiosk.html", key=Config.KIOSK_KEY, save_photos=bool(S()["save_photos"]))
 
 
 @app.route("/api/kiosk/scan", methods=["POST"])
 def kiosk_scan():
-    data = request.get_json(silent=True) or {}
-    if data.get("key") != Config.KIOSK_KEY:
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or not kiosk_key_ok(data.get("key")):
         abort(403)
     descriptor = data.get("descriptor")
     if not valid_descriptor(descriptor):
@@ -1091,7 +1248,12 @@ def kiosk_scan():
         rec.last_scan = now
         rec.check_out_photo = save_snapshot(data.get("photo"), user, "out", now) or rec.check_out_photo
         action = "check_out"
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        # Two scans of the same person arrived together; the other one already saved the record
+        db.session.rollback()
+        return jsonify(**base, action="repeat", time=now.strftime("%I:%M %p"))
     early = action == "check_out" and now.time() < hm(s["office_end"])
     return jsonify(**base, action=action, status=rec.status, early=early,
                    time=now.strftime("%I:%M %p"))
@@ -1123,6 +1285,12 @@ def upgrade_db():
             for col, sql_type in columns.items():
                 if col not in existing:
                     conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {sql_type}"))
+        # Indexes that databases made by older versions do not have yet
+        for name, target in {"ix_attendance_date": "attendance (date)",
+                             "ix_face_sample_user_id": "face_sample (user_id)",
+                             "ix_leave_request_user_id": "leave_request (user_id)",
+                             "ix_concern_user_id": "concern (user_id)"}.items():
+            conn.execute(text(f"CREATE INDEX IF NOT EXISTS {name} ON {target}"))
 
 
 with app.app_context():

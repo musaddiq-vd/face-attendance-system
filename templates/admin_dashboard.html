@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Today · Admin{% endblock %}
 {% from "_avatar.html" import avatar %}
+{# Reload every minute so new check-ins show up without pressing refresh #}
+{% block head %}<meta http-equiv="refresh" content="60">{% endblock %}
 {% block content %}
 <h1>Today — {{ today.strftime('%A, %d %B %Y') }}</h1>
 <p class="sub">{{ rules }} · <a href="{{ url_for('admin_settings') }}">Change</a></p>

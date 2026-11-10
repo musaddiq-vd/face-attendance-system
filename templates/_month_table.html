@@ -23,7 +23,8 @@
           {% if edit_user and rec and rec.check_out_photo %}<a href="{{ url_for('admin_snapshot', rel=rec.check_out_photo) }}" target="_blank"><img class="thumb" src="{{ url_for('admin_snapshot', rel=rec.check_out_photo) }}" alt="check-out photo"></a>{% endif %}</td>
         <td>{{ rec.hours if rec and rec.hours is not none else '—' }}</td>
         <td>
-          {% if edit_user %}
+          {% if edit_user and r.date > now.date() %}{# future days cannot be edited #}
+          {% elif edit_user %}
             <button class="btn small secondary edit-btn" type="button"
               data-uid="{{ edit_user.id }}" data-name="{{ edit_user.name }}" data-date="{{ r.date.isoformat() }}"
               data-in="{{ rec.check_in.strftime('%H:%M') if rec and rec.check_in else '' }}"
